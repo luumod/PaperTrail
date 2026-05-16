@@ -54,7 +54,6 @@ const createProject = async () => {
 }
 
 const selectProject = async (projectId: string) => {
-  await workbench.selectProject(projectId)
   await router.push(`/projects/${projectId}`)
 }
 </script>

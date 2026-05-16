@@ -743,6 +743,13 @@ label.file-action:hover {
 .project-page {
   display: grid;
   gap: var(--space-2xl);
+  transition: opacity var(--duration-normal) var(--ease-out), transform var(--duration-normal) var(--ease-out);
+}
+
+.project-page.is-project-switching {
+  opacity: 0.72;
+  transform: translateY(2px);
+  pointer-events: none;
 }
 
 .project-header {
@@ -807,6 +814,45 @@ label.file-action:hover {
   grid-column: span 2;
 }
 
+.plan-color-picker {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: var(--space-sm);
+}
+
+.plan-color-picker input[type="color"] {
+  min-width: 48px;
+  height: 42px;
+  padding: 4px;
+}
+
+.plan-color-picker button {
+  padding: 8px 10px;
+}
+
+.plan-palette {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  align-items: center;
+}
+
+.plan-swatch {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #ffffff;
+  border-radius: var(--radius-full);
+  padding: 0;
+  box-shadow: 0 0 0 1px var(--color-border), var(--shadow-xs);
+}
+
+.plan-swatch:hover,
+.plan-swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--color-brand), var(--shadow-sm);
+}
+
 .plan-deadline-check {
   display: inline-flex;
   gap: 7px;
@@ -824,28 +870,66 @@ label.file-action:hover {
 }
 
 .plan-timeline-wrap {
-  overflow-x: auto;
+  overflow: hidden;
+  max-width: 100%;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background:
     linear-gradient(180deg, rgba(248, 250, 252, 0.9), rgba(255, 255, 255, 0.96)),
     var(--color-surface);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
 }
 
-.plan-timeline-axis,
-.plan-timeline-canvas {
-  min-width: 760px;
+.plan-timeline-wrap.dragging {
+  cursor: grabbing;
+}
+
+.plan-timeline-wrap.empty {
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.86), rgba(255, 255, 255, 0.98)),
+    repeating-linear-gradient(45deg, rgba(148, 163, 184, 0.05) 0 10px, transparent 10px 20px),
+    var(--color-surface);
+}
+
+.plan-timeline-inner {
+  --plan-label-width: 170px;
+  --plan-track-width: 760px;
+  --plan-day-width: 1.6%;
+  --plan-week-width: 11%;
+  width: 100%;
+  min-width: 0;
 }
 
 .plan-timeline-axis {
-  position: relative;
+  display: grid;
+  grid-template-columns: var(--plan-label-width) var(--plan-track-width);
   height: 38px;
   border-bottom: 1px solid var(--color-border-light);
-  margin-left: 170px;
-  margin-right: 146px;
 }
 
-.plan-timeline-axis span {
+.plan-axis-spacer {
+  display: flex;
+  align-items: center;
+  border-right: 1px solid var(--color-border-light);
+  padding: 0 var(--space-md);
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-text-secondary);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.plan-axis-track {
+  position: relative;
+  min-width: 0;
+  background-image: linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px);
+  background-size: var(--plan-week-width) 100%;
+}
+
+.plan-axis-track span {
   position: absolute;
   bottom: 9px;
   transform: translateX(-50%);
@@ -858,6 +942,34 @@ label.file-action:hover {
 .plan-timeline-canvas {
   position: relative;
   padding: var(--space-sm) 0 var(--space-md);
+  transition: padding-bottom var(--duration-normal) var(--ease-out);
+}
+
+.plan-timeline-wrap.has-selected-range .plan-timeline-canvas {
+  padding-bottom: 156px;
+}
+
+.plan-empty-message {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  left: calc(var(--plan-label-width) + 12px);
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  color: var(--color-text-muted);
+  text-align: center;
+  pointer-events: none;
+}
+
+.plan-empty-message strong {
+  color: var(--color-text-secondary);
+  font-size: 0.88rem;
+}
+
+.plan-empty-message span {
+  font-size: 0.78rem;
 }
 
 .plan-today-line {
@@ -885,7 +997,7 @@ label.file-action:hover {
 
 .plan-row {
   display: grid;
-  grid-template-columns: 170px minmax(0, 1fr) 146px;
+  grid-template-columns: var(--plan-label-width) var(--plan-track-width);
   min-height: 58px;
   border-bottom: 1px solid var(--color-border-light);
 }
@@ -899,7 +1011,9 @@ label.file-action:hover {
   gap: 4px;
   align-content: center;
   min-width: 0;
+  border-right: 1px solid var(--color-border-light);
   padding: 0 var(--space-md);
+  background: rgba(255, 255, 255, 0.94);
 }
 
 .plan-row-label strong,
@@ -923,7 +1037,25 @@ label.file-action:hover {
   position: relative;
   min-height: 58px;
   background-image: linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px);
-  background-size: 16.66% 100%;
+  background-size: var(--plan-day-width) 100%;
+  cursor: inherit;
+}
+
+.plan-placeholder-row .plan-row-label strong,
+.plan-placeholder-row .plan-row-label small {
+  color: var(--color-text-muted);
+}
+
+.plan-placeholder-row .plan-track::after {
+  position: absolute;
+  top: 50%;
+  right: 4%;
+  left: 4%;
+  height: 8px;
+  content: "";
+  transform: translateY(-50%);
+  border-radius: var(--radius-full);
+  background: linear-gradient(90deg, rgba(148, 163, 184, 0.18), rgba(148, 163, 184, 0.06));
 }
 
 .plan-bar {
@@ -941,12 +1073,19 @@ label.file-action:hover {
   border-radius: var(--radius-full);
   padding: 0 11px;
   color: #ffffff;
+  background: var(--plan-bg);
   box-shadow: var(--shadow-sm);
+  cursor: pointer;
 }
 
 .plan-bar:hover {
+  background: var(--plan-bg);
   filter: brightness(1.03);
   box-shadow: var(--shadow-md);
+}
+
+.plan-bar:active {
+  transform: translateY(-50%) scale(0.99);
 }
 
 .plan-bar strong,
@@ -972,22 +1111,57 @@ label.file-action:hover {
   outline-offset: 2px;
 }
 
-.plan-blue { background: linear-gradient(135deg, #3b82f6, #2563eb); }
-.plan-green { background: linear-gradient(135deg, #10b981, #059669); }
-.plan-amber { background: linear-gradient(135deg, #f59e0b, #d97706); }
-.plan-rose { background: linear-gradient(135deg, #fb7185, #e11d48); }
-.plan-purple { background: linear-gradient(135deg, #8b5cf6, #7c3aed); }
-
-.plan-row-actions {
-  display: flex;
-  gap: var(--space-xs);
-  align-items: center;
-  justify-content: flex-end;
-  padding: 0 var(--space-md);
+.plan-range-popover {
+  position: absolute;
+  top: calc(50% + 24px);
+  z-index: 5;
+  display: grid;
+  gap: 6px;
+  width: min(260px, calc(100% - 24px));
+  transform: translateX(-50%);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--plan-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
 }
 
-.plan-row-actions button {
-  padding: 6px 9px;
+.plan-range-popover strong,
+.plan-range-popover small,
+.plan-range-popover p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.plan-range-popover strong {
+  white-space: nowrap;
+}
+
+.plan-range-popover small {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.plan-range-popover p {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.plan-range-popover .button-row {
+  justify-content: flex-end;
+}
+
+.plan-range-popover button {
+  padding: 6px 10px;
   font-size: 0.78rem;
 }
 

@@ -28,6 +28,7 @@ const timelinePage = ref(1)
 const editingTimelineId = ref('')
 const editingIdeaId = ref('')
 const editingPlanRangeId = ref('')
+const isProjectSwitching = ref(false)
 
 const timelineEditForm = reactive({
   title: '',
@@ -39,7 +40,7 @@ const planForm = reactive({
   description: '',
   startDate: new Date().toISOString().slice(0, 10),
   endDate: new Date().toISOString().slice(0, 10),
-  color: 'blue',
+  color: '#2563eb',
   isDeadline: false,
 })
 
@@ -55,7 +56,12 @@ watch(
   () => route.params.id,
   async (projectId) => {
     if (typeof projectId === 'string' && projectId !== workbench.activeProjectId) {
-      await workbench.selectProject(projectId)
+      isProjectSwitching.value = true
+      try {
+        await workbench.selectProject(projectId)
+      } finally {
+        isProjectSwitching.value = false
+      }
     }
   },
   { immediate: true },
@@ -74,13 +80,39 @@ watch(
 const selectedAssetVersions = computed(() => workbench.assetVersions)
 const today = computed(() => new Date().toISOString().slice(0, 10))
 const msPerDay = 24 * 60 * 60 * 1000
-const planColorOptions = [
-  { value: 'blue', label: 'Blue' },
-  { value: 'green', label: 'Green' },
-  { value: 'amber', label: 'Amber' },
-  { value: 'rose', label: 'Rose' },
-  { value: 'purple', label: 'Purple' },
+const planLabelWidth = 170
+const defaultPlanVisibleDays = 60
+const minPlanVisibleDays = 7
+const maxPlanVisibleDays = 540
+const planTrackRef = ref<HTMLElement | null>(null)
+const planViewportStart = ref('')
+const planVisibleDays = ref(defaultPlanVisibleDays)
+const isPlanDragging = ref(false)
+const planDragStartX = ref(0)
+const planDragStartDate = ref('')
+const selectedPlanRangeId = ref('')
+const defaultPlanColor = '#2563eb'
+const planPalette = [
+  defaultPlanColor,
+  '#059669',
+  '#d97706',
+  '#e11d48',
+  '#7c3aed',
+  '#0891b2',
+  '#ea580c',
+  '#4f46e5',
+  '#16a34a',
+  '#be123c',
+  '#9333ea',
+  '#0f766e',
 ]
+const legacyPlanColors: Record<string, string> = {
+  blue: '#2563eb',
+  green: '#059669',
+  amber: '#d97706',
+  rose: '#e11d48',
+  purple: '#7c3aed',
+}
 
 const parseDay = (value: string) => new Date(`${value}T00:00:00`).getTime()
 const addDays = (value: string, days: number) => {
@@ -90,6 +122,12 @@ const addDays = (value: string, days: number) => {
 }
 const dayDiff = (from: string, to: string) => Math.round((parseDay(to) - parseDay(from)) / msPerDay)
 const rangeDuration = (range: ProjectPlanRange) => Math.max(1, dayDiff(range.startDate, range.endDate) + 1)
+const resolvePlanColor = (value: string) =>
+  /^#[0-9a-f]{6}$/i.test(value) ? value : legacyPlanColors[value] ?? defaultPlanColor
+const nextAutoPlanColor = () => planPalette[workbench.planRanges.length % planPalette.length] ?? defaultPlanColor
+const applyAutoPlanColor = () => {
+  planForm.color = nextAutoPlanColor()
+}
 
 const sortedPlanRanges = computed(() =>
   [...workbench.planRanges].sort(
@@ -110,40 +148,169 @@ const planBounds = computed(() => {
   }
 })
 
-const planSpanDays = computed(() => Math.max(1, dayDiff(planBounds.value.start, planBounds.value.end) + 1))
-const percentForDate = (date: string) =>
-  Math.min(100, Math.max(0, (dayDiff(planBounds.value.start, date) / planSpanDays.value) * 100))
+const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
+const planViewportStartDate = computed(() => planViewportStart.value || addDays(today.value, -7))
+const planViewportEndDate = computed(() => addDays(planViewportStartDate.value, planVisibleDays.value - 1))
+const percentForVisibleDate = (date: string) =>
+  (dayDiff(planViewportStartDate.value, date) / planVisibleDays.value) * 100
+const planTimelineStyle = computed(() => ({
+  '--plan-label-width': `${planLabelWidth}px`,
+  '--plan-track-width': 'minmax(0, 1fr)',
+  '--plan-day-width': `${100 / planVisibleDays.value}%`,
+  '--plan-week-width': `${(7 / planVisibleDays.value) * 100}%`,
+}))
 
 const planTimelineItems = computed(() =>
-  sortedPlanRanges.value.map((range) => {
-    const left = percentForDate(range.startDate)
-    const width = Math.max(3, ((rangeDuration(range)) / planSpanDays.value) * 100)
-    return {
-      range,
-      left,
-      width: Math.min(100 - left, width),
-      duration: rangeDuration(range),
-    }
-  }),
+  sortedPlanRanges.value
+    .map((range) => {
+      const startsAfterViewport = range.startDate > planViewportEndDate.value
+      const endsBeforeViewport = range.endDate < planViewportStartDate.value
+      if (startsAfterViewport || endsBeforeViewport) return null
+
+      const visibleStart = clamp(percentForVisibleDate(range.startDate), 0, 100)
+      const visibleEnd = clamp(percentForVisibleDate(addDays(range.endDate, 1)), 0, 100)
+
+      return {
+        range,
+        left: visibleStart,
+        width: Math.max(1.6, visibleEnd - visibleStart),
+        duration: rangeDuration(range),
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null),
 )
 
+const planPlaceholderRows = ['Survey / Design', 'Experiments', 'Writing / Deadline']
+const planBarStyle = (item: { left: number; width: number; range: ProjectPlanRange }) => ({
+  left: `${item.left}%`,
+  width: `${item.width}%`,
+  '--plan-bg': resolvePlanColor(item.range.color),
+})
+
+const planPopoverStyle = (item: { left: number; width: number; range: ProjectPlanRange }) => ({
+  left: `${clamp(item.left + item.width / 2, 12, 88)}%`,
+  '--plan-bg': resolvePlanColor(item.range.color),
+})
+
 const planTicks = computed(() => {
-  const tickCount = 6
-  return Array.from({ length: tickCount }, (_, index) => {
-    const offset = Math.round((planSpanDays.value - 1) * (index / (tickCount - 1)))
-    const date = addDays(planBounds.value.start, offset)
+  const interval =
+    planVisibleDays.value <= 21 ? 2 : planVisibleDays.value <= 60 ? 7 : planVisibleDays.value <= 150 ? 14 : 30
+  const offsets = new Set<number>()
+
+  for (let offset = 0; offset < planVisibleDays.value; offset += interval) {
+    offsets.add(offset)
+  }
+  offsets.add(planVisibleDays.value - 1)
+
+  return [...offsets].sort((a, b) => a - b).map((offset) => {
+    const date = addDays(planViewportStartDate.value, offset)
     return {
       date,
       label: new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
       }),
-      left: percentForDate(date),
+      left: (offset / planVisibleDays.value) * 100,
     }
   })
 })
 
-const todayLeft = computed(() => percentForDate(today.value))
+const todayLeft = computed(() => {
+  const left = percentForVisibleDate(today.value)
+  return left >= 0 && left <= 100 ? left : null
+})
+
+const todayLineStyle = computed(() =>
+  todayLeft.value === null
+    ? {}
+    : { left: `calc(var(--plan-label-width) + (100% - var(--plan-label-width)) * ${todayLeft.value / 100})` },
+)
+
+const planViewportLabel = computed(
+  () => `${planViewportStartDate.value} - ${planViewportEndDate.value}`,
+)
+
+const resetPlanViewport = () => {
+  planVisibleDays.value = defaultPlanVisibleDays
+  planViewportStart.value = sortedPlanRanges.value[0]?.startDate
+    ? addDays(sortedPlanRanges.value[0].startDate, -7)
+    : addDays(today.value, -7)
+  selectedPlanRangeId.value = ''
+}
+
+watch(
+  () => workbench.activeProjectId,
+  () => resetPlanViewport(),
+  { immediate: true },
+)
+
+const focusPlanWindow = (startDate: string, endDate: string) => {
+  const duration = rangeDuration({
+    id: '',
+    projectId: '',
+    title: '',
+    description: '',
+    startDate,
+    endDate,
+    color: defaultPlanColor,
+    isDeadline: false,
+    createdAt: '',
+    updatedAt: '',
+  })
+
+  if (duration + 14 > planVisibleDays.value) {
+    planVisibleDays.value = clamp(duration + 14, minPlanVisibleDays, maxPlanVisibleDays)
+  }
+
+  if (startDate < planViewportStartDate.value || endDate > planViewportEndDate.value) {
+    const center = addDays(startDate, Math.floor(dayDiff(startDate, endDate) / 2))
+    planViewportStart.value = addDays(center, -Math.floor(planVisibleDays.value / 2))
+  }
+}
+
+const zoomPlanTimeline = (event: WheelEvent) => {
+  const rect = planTrackRef.value?.getBoundingClientRect()
+  const pointerRatio = rect ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0.5
+  const oldDays = planVisibleDays.value
+  const focusDate = addDays(planViewportStartDate.value, Math.round(oldDays * pointerRatio))
+  const zoomFactor = event.deltaY > 0 ? 1.18 : 0.84
+  const nextDays = clamp(Math.round(oldDays * zoomFactor), minPlanVisibleDays, maxPlanVisibleDays)
+
+  planVisibleDays.value = nextDays
+  planViewportStart.value = addDays(focusDate, -Math.round(nextDays * pointerRatio))
+  selectedPlanRangeId.value = ''
+}
+
+const startPlanPan = (event: PointerEvent) => {
+  if (event.button !== 0) return
+  const target = event.target as HTMLElement
+  if (target.closest('button, input, textarea, select, .plan-range-popover')) return
+
+  isPlanDragging.value = true
+  planDragStartX.value = event.clientX
+  planDragStartDate.value = planViewportStartDate.value
+  selectedPlanRangeId.value = ''
+  ;(event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+}
+
+const movePlanPan = (event: PointerEvent) => {
+  if (!isPlanDragging.value) return
+  const width = planTrackRef.value?.getBoundingClientRect().width ?? 760
+  const dayDelta = Math.round(((planDragStartX.value - event.clientX) / width) * planVisibleDays.value)
+  planViewportStart.value = addDays(planDragStartDate.value, dayDelta)
+}
+
+const stopPlanPan = (event: PointerEvent) => {
+  if (!isPlanDragging.value) return
+  isPlanDragging.value = false
+  if ((event.currentTarget as HTMLElement).hasPointerCapture(event.pointerId)) {
+    ;(event.currentTarget as HTMLElement).releasePointerCapture(event.pointerId)
+  }
+}
+
+const selectPlanRange = (range: ProjectPlanRange) => {
+  selectedPlanRangeId.value = selectedPlanRangeId.value === range.id ? '' : range.id
+}
 const deadlineTarget = computed(() => {
   const deadlineRanges = sortedPlanRanges.value
     .filter((range) => range.isDeadline)
@@ -289,21 +456,23 @@ onBeforeUnmount(stopAssetRefresh)
 
 const resetPlanForm = () => {
   editingPlanRangeId.value = ''
+  selectedPlanRangeId.value = ''
   planForm.title = ''
   planForm.description = ''
   planForm.startDate = today.value
   planForm.endDate = today.value
-  planForm.color = 'blue'
+  planForm.color = nextAutoPlanColor()
   planForm.isDeadline = false
 }
 
 const startEditPlanRange = (range: ProjectPlanRange) => {
+  selectedPlanRangeId.value = ''
   editingPlanRangeId.value = range.id
   planForm.title = range.title
   planForm.description = range.description
   planForm.startDate = range.startDate
   planForm.endDate = range.endDate
-  planForm.color = range.color
+  planForm.color = resolvePlanColor(range.color)
   planForm.isDeadline = range.isDeadline
 }
 
@@ -323,6 +492,7 @@ const savePlanRange = async () => {
     await workbench.createPlanRange(input)
   }
 
+  focusPlanWindow(input.startDate, input.endDate)
   resetPlanForm()
 }
 
@@ -331,6 +501,7 @@ const deletePlanRange = async (range: ProjectPlanRange) => {
   if (editingPlanRangeId.value === range.id) {
     resetPlanForm()
   }
+  selectedPlanRangeId.value = ''
   await workbench.deletePlanRange(range.id)
 }
 
@@ -474,7 +645,11 @@ const exportTimeline = async (format: TimelineExportFormat) => {
 </script>
 
 <template>
-  <section v-if="workbench.activeProject" class="project-page">
+  <section
+    v-if="workbench.activeProject"
+    class="project-page"
+    :class="{ 'is-project-switching': isProjectSwitching }"
+  >
     <header class="project-header">
       <div>
         <p class="eyebrow">Project</p>
@@ -501,24 +676,35 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           <h2>Project Plan Timeline</h2>
           <span>{{ deadlineStatus }}</span>
         </div>
-        <span>{{ sortedPlanRanges.length }} ranges</span>
+        <span>{{ planViewportLabel }} | {{ sortedPlanRanges.length }} ranges</span>
       </div>
 
       <form class="plan-form" @submit.prevent="savePlanRange">
         <input v-model="planForm.title" type="text" placeholder="Milestone or task title" />
         <input v-model="planForm.startDate" type="date" />
         <input v-model="planForm.endDate" type="date" />
-        <select v-model="planForm.color">
-          <option v-for="option in planColorOptions" :key="option.value" :value="option.value">
-            {{ option.label }}
-          </option>
-        </select>
+        <div class="plan-color-picker">
+          <input v-model="planForm.color" type="color" title="Plan color" />
+          <button type="button" @click="applyAutoPlanColor">Auto</button>
+        </div>
         <input
           v-model="planForm.description"
           class="plan-description-input"
           type="text"
           placeholder="Short description: experiment window, writing sprint, rebuttal, deadline..."
         />
+        <div class="plan-palette" aria-label="Plan color palette">
+          <button
+            v-for="color in planPalette"
+            :key="color"
+            type="button"
+            class="plan-swatch"
+            :class="{ active: resolvePlanColor(planForm.color) === color }"
+            :style="{ backgroundColor: color }"
+            :title="color"
+            @click="planForm.color = color"
+          />
+        </div>
         <label class="plan-deadline-check">
           <input v-model="planForm.isDeadline" type="checkbox" />
           Deadline
@@ -529,51 +715,94 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         <button v-if="editingPlanRangeId" type="button" @click="resetPlanForm">Cancel</button>
       </form>
 
-      <div v-if="planTimelineItems.length" class="plan-timeline-wrap">
-        <div class="plan-timeline-axis">
-          <span
-            v-for="tick in planTicks"
-            :key="tick.date"
-            :style="{ left: `${tick.left}%` }"
-          >
-            {{ tick.label }}
-          </span>
+      <div
+        class="plan-timeline-wrap"
+        :class="{
+          empty: !sortedPlanRanges.length,
+          dragging: isPlanDragging,
+          'has-selected-range': !!selectedPlanRangeId,
+        }"
+        @wheel.prevent="zoomPlanTimeline"
+        @pointerdown="startPlanPan"
+        @pointermove="movePlanPan"
+        @pointerup="stopPlanPan"
+        @pointerleave="stopPlanPan"
+        @pointercancel="stopPlanPan"
+      >
+        <div class="plan-timeline-inner" :style="planTimelineStyle">
+          <div class="plan-timeline-axis">
+            <div class="plan-axis-spacer">Calendar</div>
+            <div ref="planTrackRef" class="plan-axis-track">
+              <span
+                v-for="tick in planTicks"
+                :key="tick.date"
+                :style="{ left: `${tick.left}%` }"
+              >
+                {{ tick.label }}
+              </span>
+            </div>
         </div>
         <div class="plan-timeline-canvas">
-          <div class="plan-today-line" :style="{ left: `calc(170px + (100% - 316px) * ${todayLeft / 100})` }">
+          <div v-if="todayLeft !== null" class="plan-today-line" :style="todayLineStyle">
             <span>Today</span>
           </div>
+          <article v-if="!planTimelineItems.length" class="plan-empty-message">
+            <strong>{{ sortedPlanRanges.length ? 'No ranges in this view' : 'No plan ranges yet' }}</strong>
+            <span>{{ sortedPlanRanges.length ? 'Current window has no scheduled ranges.' : 'Add a range above and it will appear on this calendar.' }}</span>
+          </article>
+          <template v-if="!planTimelineItems.length">
+            <article
+              v-for="label in planPlaceholderRows"
+              :key="label"
+              class="plan-row plan-placeholder-row"
+            >
+              <div class="plan-row-label">
+                <strong>{{ label }}</strong>
+                <small>Waiting for plan</small>
+              </div>
+              <div class="plan-track" />
+            </article>
+          </template>
           <article v-for="item in planTimelineItems" :key="item.range.id" class="plan-row">
             <div class="plan-row-label">
               <strong :title="item.range.title">{{ item.range.title }}</strong>
               <small>
-                {{ item.range.startDate }} - {{ item.range.endDate }} · {{ item.duration }} days
+                {{ item.range.startDate }} - {{ item.range.endDate }} | {{ item.duration }} days
               </small>
             </div>
             <div class="plan-track">
               <button
                 type="button"
                 class="plan-bar"
-                :class="[`plan-${item.range.color}`, { deadline: item.range.isDeadline }]"
-                :style="{ left: `${item.left}%`, width: `${item.width}%` }"
+                :class="{ deadline: item.range.isDeadline }"
+                :style="planBarStyle(item)"
                 :title="item.range.description || item.range.title"
-                @click="startEditPlanRange(item.range)"
+                @pointerdown.stop
+                @click.stop="selectPlanRange(item.range)"
               >
                 <strong>{{ item.range.title }}</strong>
                 <span>{{ item.duration }}d</span>
               </button>
-            </div>
-            <div class="plan-row-actions">
-              <button type="button" @click="startEditPlanRange(item.range)">Modify</button>
-              <button type="button" class="danger-button" @click="deletePlanRange(item.range)">Delete</button>
+              <div
+                v-if="selectedPlanRangeId === item.range.id"
+                class="plan-range-popover"
+                :style="planPopoverStyle(item)"
+                @pointerdown.stop
+                @click.stop
+              >
+                <strong>{{ item.range.title }}</strong>
+                <small>{{ item.range.startDate }} - {{ item.range.endDate }}</small>
+                <p>{{ item.range.description || 'No description.' }}</p>
+                <div class="button-row">
+                  <button type="button" @click="startEditPlanRange(item.range)">Modify</button>
+                  <button type="button" class="danger-button" @click="deletePlanRange(item.range)">Delete</button>
+                </div>
+              </div>
             </div>
           </article>
+          </div>
         </div>
       </div>
-
-      <p v-else class="empty-copy">
-        Add planning ranges to see submission deadlines, experiment windows, writing sprints, and revision periods.
-      </p>
     </section>
 
     <div class="workbench-grid">

@@ -281,13 +281,29 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const setBundle = (bundle: ProjectBundle) => {
-    assets.value = bundle.assets
-    versions.value = bundle.versions
-    ideas.value = bundle.ideas.map((idea) => normalizeIdea(idea))
-    planRanges.value = bundle.planRanges.map((range) => normalizePlanRange(range))
-    events.value = bundle.events
-    summaries.value = bundle.summaries
+    assets.value = bundle.assets ?? []
+    versions.value = bundle.versions ?? []
+    ideas.value = (bundle.ideas ?? []).map((idea) => normalizeIdea(idea))
+    planRanges.value = (bundle.planRanges ?? []).map((range) => normalizePlanRange(range))
+    events.value = bundle.events ?? []
+    summaries.value = bundle.summaries ?? []
     selectedAssetId.value = ''
+  }
+
+  const localProjectBundle = (projectId: string): ProjectBundle => {
+    const local = loadLocalState()
+    const projectAssets = local.assets.filter((asset) => asset.projectId === projectId)
+
+    return {
+      assets: projectAssets,
+      versions: local.versions.filter((version) =>
+        projectAssets.some((asset) => asset.id === version.assetId),
+      ),
+      ideas: local.ideas.filter((idea) => idea.projectId === projectId),
+      planRanges: local.planRanges.filter((range) => range.projectId === projectId),
+      events: local.events.filter((event) => event.projectId === projectId),
+      summaries: local.summaries.filter((summary) => summary.projectId === projectId),
+    }
   }
 
   const refreshProjectBundle = async (projectId = activeProjectId.value) => {
@@ -301,19 +317,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       return
     }
 
-    const local = loadLocalState()
-    const projectAssets = local.assets.filter((asset) => asset.projectId === projectId)
-
-    setBundle({
-      assets: projectAssets,
-      versions: local.versions.filter((version) =>
-        projectAssets.some((asset) => asset.id === version.assetId),
-      ),
-      ideas: local.ideas.filter((idea) => idea.projectId === projectId),
-      planRanges: local.planRanges.filter((range) => range.projectId === projectId),
-      events: local.events.filter((event) => event.projectId === projectId),
-      summaries: local.summaries.filter((summary) => summary.projectId === projectId),
-    })
+    setBundle(localProjectBundle(projectId))
   }
 
   const init = async () =>
@@ -551,9 +555,14 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   const selectProject = async (projectId: string) =>
     runAction(async () => {
-      activeProjectId.value = projectId
-      selectedAssetId.value = ''
-      await refreshProjectBundle(projectId)
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.getProjectBundle(projectId)
+        activeProjectId.value = projectId
+        setBundle(bundle)
+      } else {
+        activeProjectId.value = projectId
+        setBundle(localProjectBundle(projectId))
+      }
       persistLocal()
     }, 'Failed to select project')
 
