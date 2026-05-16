@@ -167,7 +167,22 @@ const tagsFromJson = (value) => {
 const getSql = async () => {
   if (!sqlPromise) {
     sqlPromise = initSqlJs({
-      locateFile: (file) => path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file),
+      locateFile: (file) => {
+        const unpackedPath = path.join(
+          process.resourcesPath || '',
+          'app.asar.unpacked',
+          'node_modules',
+          'sql.js',
+          'dist',
+          file,
+        )
+
+        if (app.isPackaged && fs.existsSync(unpackedPath)) {
+          return unpackedPath
+        }
+
+        return path.join(__dirname, '..', 'node_modules', 'sql.js', 'dist', file)
+      },
     })
   }
   return sqlPromise
