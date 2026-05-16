@@ -11,6 +11,8 @@ import type {
   Project,
   ProjectInput,
   ProjectMetrics,
+  ProjectPlanRange,
+  ProjectPlanRangeInput,
   ProjectStage,
   ProjectBundle,
   TimelineExportFormat,
@@ -80,6 +82,21 @@ const normalizeIdea = (
   updatedAt: idea.updatedAt ?? idea.createdAt ?? nowIso(),
 })
 
+const normalizePlanRange = (
+  range: Partial<ProjectPlanRange> & Pick<ProjectPlanRange, 'id' | 'projectId' | 'title' | 'startDate' | 'endDate'>,
+): ProjectPlanRange => ({
+  id: range.id,
+  projectId: range.projectId,
+  title: range.title,
+  description: range.description ?? '',
+  startDate: range.startDate,
+  endDate: range.endDate,
+  color: range.color ?? 'blue',
+  isDeadline: range.isDeadline ?? false,
+  createdAt: range.createdAt ?? nowIso(),
+  updatedAt: range.updatedAt ?? range.createdAt ?? nowIso(),
+})
+
 const detectType = (name: string, mimeType = ''): AssetType => {
   const ext = name.split('.').pop()?.toLowerCase() ?? ''
 
@@ -101,6 +118,7 @@ const emptyLocalState = (): LocalState => ({
   assets: [],
   versions: [],
   ideas: [],
+  planRanges: [],
   events: [],
   summaries: [],
 })
@@ -116,6 +134,7 @@ const loadLocalState = (): LocalState => {
       ...parsed,
       projects: parsed.projects.map((project) => normalizeProject(project)),
       ideas: parsed.ideas.map((idea) => normalizeIdea(idea)),
+      planRanges: parsed.planRanges.map((range) => normalizePlanRange(range)),
     }
   } catch {
     localStorage.removeItem(LOCAL_KEY)
@@ -130,6 +149,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const assets = ref<Asset[]>([])
   const versions = ref<AssetVersion[]>([])
   const ideas = ref<Idea[]>([])
+  const planRanges = ref<ProjectPlanRange[]>([])
   const events = ref<TimelineEvent[]>([])
   const summaries = ref<DailySummary[]>([])
   const searchQuery = ref('')
@@ -213,6 +233,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         ...local.ideas.filter((idea) => idea.projectId !== activeProjectId.value),
         ...ideas.value,
       ],
+      planRanges: [
+        ...local.planRanges.filter((range) => range.projectId !== activeProjectId.value),
+        ...planRanges.value,
+      ],
       events: [
         ...local.events.filter((event) => event.projectId !== activeProjectId.value),
         ...events.value,
@@ -260,6 +284,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     assets.value = bundle.assets
     versions.value = bundle.versions
     ideas.value = bundle.ideas.map((idea) => normalizeIdea(idea))
+    planRanges.value = bundle.planRanges.map((range) => normalizePlanRange(range))
     events.value = bundle.events
     summaries.value = bundle.summaries
     selectedAssetId.value = ''
@@ -267,7 +292,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   const refreshProjectBundle = async (projectId = activeProjectId.value) => {
     if (!projectId) {
-      setBundle({ assets: [], versions: [], ideas: [], events: [], summaries: [] })
+      setBundle({ assets: [], versions: [], ideas: [], planRanges: [], events: [], summaries: [] })
       return
     }
 
@@ -285,6 +310,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         projectAssets.some((asset) => asset.id === version.assetId),
       ),
       ideas: local.ideas.filter((idea) => idea.projectId === projectId),
+      planRanges: local.planRanges.filter((range) => range.projectId === projectId),
       events: local.events.filter((event) => event.projectId === projectId),
       summaries: local.summaries.filter((summary) => summary.projectId === projectId),
     })
@@ -375,6 +401,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       assets.value = []
       versions.value = []
       ideas.value = []
+      planRanges.value = []
       summaries.value = []
       events.value = [event]
       persistLocal()
@@ -506,6 +533,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         assets: projectAssets,
         versions: local.versions.filter((version) => assetIds.has(version.assetId)),
         ideas: local.ideas.filter((idea) => idea.projectId === projectId),
+        planRanges: local.planRanges.filter((range) => range.projectId === projectId),
         events: local.events.filter((event) => event.projectId === projectId),
         summaries: local.summaries.filter((summary) => summary.projectId === projectId),
       }
@@ -864,6 +892,109 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
     }, 'Failed to delete idea')
 
+  const validatePlanRange = (input: ProjectPlanRangeInput) => {
+    if (!input.title.trim() || !input.startDate || !input.endDate) {
+      throw new Error('Plan title, start date, and end date are required.')
+    }
+
+    if (input.startDate > input.endDate) {
+      throw new Error('Plan start date cannot be later than end date.')
+    }
+  }
+
+  const touchProject = (projectId: string, updatedAt: string) => {
+    projects.value = projects.value.map((project) =>
+      project.id === projectId ? { ...project, updatedAt } : project,
+    )
+  }
+
+  const createPlanRange = async (input: ProjectPlanRangeInput) =>
+    runAction(async () => {
+      if (!activeProjectId.value) return
+      validatePlanRange(input)
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.createPlanRange(activeProjectId.value, input)
+        setBundle(bundle)
+        projects.value = await desktopApi.listProjects()
+        return
+      }
+
+      const timestamp = nowIso()
+      const range: ProjectPlanRange = {
+        id: makeId('plan'),
+        projectId: activeProjectId.value,
+        title: input.title.trim(),
+        description: input.description.trim(),
+        startDate: input.startDate,
+        endDate: input.endDate,
+        color: input.color,
+        isDeadline: input.isDeadline,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      planRanges.value = [...planRanges.value, range].sort((a, b) =>
+        a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate),
+      )
+      touchProject(activeProjectId.value, timestamp)
+      persistLocal()
+      return range
+    }, 'Failed to create plan range')
+
+  const updatePlanRange = async (rangeId: string, input: ProjectPlanRangeInput) =>
+    runAction(async () => {
+      validatePlanRange(input)
+
+      if (usingDesktop.value) {
+        const updated = await desktopApi.updatePlanRange(rangeId, input)
+        planRanges.value = planRanges.value
+          .map((range) => (range.id === updated.id ? normalizePlanRange(updated) : range))
+          .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate))
+        projects.value = await desktopApi.listProjects()
+        return updated
+      }
+
+      const existing = planRanges.value.find((range) => range.id === rangeId)
+      if (!existing) return
+
+      const timestamp = nowIso()
+      const updated: ProjectPlanRange = {
+        ...existing,
+        title: input.title.trim(),
+        description: input.description.trim(),
+        startDate: input.startDate,
+        endDate: input.endDate,
+        color: input.color,
+        isDeadline: input.isDeadline,
+        updatedAt: timestamp,
+      }
+      planRanges.value = planRanges.value
+        .map((range) => (range.id === rangeId ? updated : range))
+        .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate))
+      touchProject(existing.projectId, timestamp)
+      persistLocal()
+      return updated
+    }, 'Failed to update plan range')
+
+  const deletePlanRange = async (rangeId: string) =>
+    runAction(async () => {
+      const existing = planRanges.value.find((range) => range.id === rangeId)
+      if (!existing) return
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.deletePlanRange(rangeId)
+        setBundle(bundle)
+        projects.value = await desktopApi.listProjects()
+        return
+      }
+
+      const timestamp = nowIso()
+      planRanges.value = planRanges.value.filter((range) => range.id !== rangeId)
+      touchProject(existing.projectId, timestamp)
+      persistLocal()
+    }, 'Failed to delete plan range')
+
   const saveDailySummary = async (day: string, summary: string) =>
     runAction(async () => {
       if (!activeProjectId.value) return
@@ -970,6 +1101,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     assets,
     versions,
     ideas,
+    planRanges,
     events,
     summaries,
     searchQuery,
@@ -1003,6 +1135,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     createIdea,
     updateIdea,
     deleteIdea,
+    createPlanRange,
+    updatePlanRange,
+    deletePlanRange,
     saveDailySummary,
     updateTimelineEvent,
     deleteTimelineEvent,

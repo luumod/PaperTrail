@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProjectStageLabel, useWorkbenchStore } from '@/stores/workbench'
-import type { AssetSummaryKey, Idea, TimelineEvent, TimelineExportFormat } from '@/types'
+import type { AssetSummaryKey, Idea, ProjectPlanRange, TimelineEvent, TimelineExportFormat } from '@/types'
 
 const route = useRoute()
 const workbench = useWorkbenchStore()
@@ -27,10 +27,20 @@ const versionError = ref('')
 const timelinePage = ref(1)
 const editingTimelineId = ref('')
 const editingIdeaId = ref('')
+const editingPlanRangeId = ref('')
 
 const timelineEditForm = reactive({
   title: '',
   description: '',
+})
+
+const planForm = reactive({
+  title: '',
+  description: '',
+  startDate: new Date().toISOString().slice(0, 10),
+  endDate: new Date().toISOString().slice(0, 10),
+  color: 'blue',
+  isDeadline: false,
 })
 
 const ideaEditForm = reactive({
@@ -63,6 +73,93 @@ watch(
 
 const selectedAssetVersions = computed(() => workbench.assetVersions)
 const today = computed(() => new Date().toISOString().slice(0, 10))
+const msPerDay = 24 * 60 * 60 * 1000
+const planColorOptions = [
+  { value: 'blue', label: 'Blue' },
+  { value: 'green', label: 'Green' },
+  { value: 'amber', label: 'Amber' },
+  { value: 'rose', label: 'Rose' },
+  { value: 'purple', label: 'Purple' },
+]
+
+const parseDay = (value: string) => new Date(`${value}T00:00:00`).getTime()
+const addDays = (value: string, days: number) => {
+  const date = new Date(`${value}T00:00:00`)
+  date.setDate(date.getDate() + days)
+  return date.toISOString().slice(0, 10)
+}
+const dayDiff = (from: string, to: string) => Math.round((parseDay(to) - parseDay(from)) / msPerDay)
+const rangeDuration = (range: ProjectPlanRange) => Math.max(1, dayDiff(range.startDate, range.endDate) + 1)
+
+const sortedPlanRanges = computed(() =>
+  [...workbench.planRanges].sort(
+    (a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate),
+  ),
+)
+
+const planBounds = computed(() => {
+  const dates = sortedPlanRanges.value.flatMap((range) => [range.startDate, range.endDate])
+  dates.push(today.value)
+
+  const min = dates.reduce((earliest, date) => (date < earliest ? date : earliest), dates[0] ?? today.value)
+  const max = dates.reduce((latest, date) => (date > latest ? date : latest), dates[0] ?? today.value)
+
+  return {
+    start: addDays(min, sortedPlanRanges.value.length ? -2 : -7),
+    end: addDays(max, sortedPlanRanges.value.length ? 4 : 30),
+  }
+})
+
+const planSpanDays = computed(() => Math.max(1, dayDiff(planBounds.value.start, planBounds.value.end) + 1))
+const percentForDate = (date: string) =>
+  Math.min(100, Math.max(0, (dayDiff(planBounds.value.start, date) / planSpanDays.value) * 100))
+
+const planTimelineItems = computed(() =>
+  sortedPlanRanges.value.map((range) => {
+    const left = percentForDate(range.startDate)
+    const width = Math.max(3, ((rangeDuration(range)) / planSpanDays.value) * 100)
+    return {
+      range,
+      left,
+      width: Math.min(100 - left, width),
+      duration: rangeDuration(range),
+    }
+  }),
+)
+
+const planTicks = computed(() => {
+  const tickCount = 6
+  return Array.from({ length: tickCount }, (_, index) => {
+    const offset = Math.round((planSpanDays.value - 1) * (index / (tickCount - 1)))
+    const date = addDays(planBounds.value.start, offset)
+    return {
+      date,
+      label: new Date(`${date}T00:00:00`).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+      }),
+      left: percentForDate(date),
+    }
+  })
+})
+
+const todayLeft = computed(() => percentForDate(today.value))
+const deadlineTarget = computed(() => {
+  const deadlineRanges = sortedPlanRanges.value
+    .filter((range) => range.isDeadline)
+    .sort((a, b) => a.endDate.localeCompare(b.endDate))
+  return deadlineRanges.find((range) => range.endDate >= today.value) ?? deadlineRanges.at(-1) ?? null
+})
+
+const deadlineStatus = computed(() => {
+  const target = deadlineTarget.value
+  if (!target) return 'No deadline set'
+
+  const days = dayDiff(today.value, target.endDate)
+  if (days > 0) return `${days} days until ${target.title}`
+  if (days === 0) return `${target.title} is today`
+  return `${Math.abs(days)} days after ${target.title}`
+})
 const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
   const stats = {
     md: 0,
@@ -189,6 +286,53 @@ const closeAssetDetail = () => {
 }
 
 onBeforeUnmount(stopAssetRefresh)
+
+const resetPlanForm = () => {
+  editingPlanRangeId.value = ''
+  planForm.title = ''
+  planForm.description = ''
+  planForm.startDate = today.value
+  planForm.endDate = today.value
+  planForm.color = 'blue'
+  planForm.isDeadline = false
+}
+
+const startEditPlanRange = (range: ProjectPlanRange) => {
+  editingPlanRangeId.value = range.id
+  planForm.title = range.title
+  planForm.description = range.description
+  planForm.startDate = range.startDate
+  planForm.endDate = range.endDate
+  planForm.color = range.color
+  planForm.isDeadline = range.isDeadline
+}
+
+const savePlanRange = async () => {
+  const input = {
+    title: planForm.title.trim(),
+    description: planForm.description.trim(),
+    startDate: planForm.startDate,
+    endDate: planForm.endDate,
+    color: planForm.color,
+    isDeadline: planForm.isDeadline,
+  }
+
+  if (editingPlanRangeId.value) {
+    await workbench.updatePlanRange(editingPlanRangeId.value, input)
+  } else {
+    await workbench.createPlanRange(input)
+  }
+
+  resetPlanForm()
+}
+
+const deletePlanRange = async (range: ProjectPlanRange) => {
+  if (!confirm(`Delete plan range "${range.title}"?`)) return
+  if (editingPlanRangeId.value === range.id) {
+    resetPlanForm()
+  }
+  await workbench.deletePlanRange(range.id)
+}
 
 const addIdea = async () => {
   if (!ideaForm.title.trim() || !ideaForm.content.trim()) {
@@ -350,6 +494,87 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         <input ref="fileInput" class="visually-hidden" type="file" multiple @change="importBrowserFiles" />
       </div>
     </header>
+
+    <section class="panel project-plan-panel">
+      <div class="panel-heading plan-heading">
+        <div>
+          <h2>Project Plan Timeline</h2>
+          <span>{{ deadlineStatus }}</span>
+        </div>
+        <span>{{ sortedPlanRanges.length }} ranges</span>
+      </div>
+
+      <form class="plan-form" @submit.prevent="savePlanRange">
+        <input v-model="planForm.title" type="text" placeholder="Milestone or task title" />
+        <input v-model="planForm.startDate" type="date" />
+        <input v-model="planForm.endDate" type="date" />
+        <select v-model="planForm.color">
+          <option v-for="option in planColorOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+        <input
+          v-model="planForm.description"
+          class="plan-description-input"
+          type="text"
+          placeholder="Short description: experiment window, writing sprint, rebuttal, deadline..."
+        />
+        <label class="plan-deadline-check">
+          <input v-model="planForm.isDeadline" type="checkbox" />
+          Deadline
+        </label>
+        <button type="submit" class="primary-button" :disabled="workbench.loading">
+          {{ editingPlanRangeId ? 'Save Range' : 'Add Range' }}
+        </button>
+        <button v-if="editingPlanRangeId" type="button" @click="resetPlanForm">Cancel</button>
+      </form>
+
+      <div v-if="planTimelineItems.length" class="plan-timeline-wrap">
+        <div class="plan-timeline-axis">
+          <span
+            v-for="tick in planTicks"
+            :key="tick.date"
+            :style="{ left: `${tick.left}%` }"
+          >
+            {{ tick.label }}
+          </span>
+        </div>
+        <div class="plan-timeline-canvas">
+          <div class="plan-today-line" :style="{ left: `calc(170px + (100% - 316px) * ${todayLeft / 100})` }">
+            <span>Today</span>
+          </div>
+          <article v-for="item in planTimelineItems" :key="item.range.id" class="plan-row">
+            <div class="plan-row-label">
+              <strong :title="item.range.title">{{ item.range.title }}</strong>
+              <small>
+                {{ item.range.startDate }} - {{ item.range.endDate }} · {{ item.duration }} days
+              </small>
+            </div>
+            <div class="plan-track">
+              <button
+                type="button"
+                class="plan-bar"
+                :class="[`plan-${item.range.color}`, { deadline: item.range.isDeadline }]"
+                :style="{ left: `${item.left}%`, width: `${item.width}%` }"
+                :title="item.range.description || item.range.title"
+                @click="startEditPlanRange(item.range)"
+              >
+                <strong>{{ item.range.title }}</strong>
+                <span>{{ item.duration }}d</span>
+              </button>
+            </div>
+            <div class="plan-row-actions">
+              <button type="button" @click="startEditPlanRange(item.range)">Modify</button>
+              <button type="button" class="danger-button" @click="deletePlanRange(item.range)">Delete</button>
+            </div>
+          </article>
+        </div>
+      </div>
+
+      <p v-else class="empty-copy">
+        Add planning ranges to see submission deadlines, experiment windows, writing sprints, and revision periods.
+      </p>
+    </section>
 
     <div class="workbench-grid">
       <section class="panel asset-library">

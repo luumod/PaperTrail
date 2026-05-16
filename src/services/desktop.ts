@@ -4,6 +4,8 @@ import type {
   Idea,
   Project,
   ProjectInput,
+  ProjectPlanRange,
+  ProjectPlanRangeInput,
   ProjectBundle,
   TimelineEvent,
   TimelineExportFormat,
@@ -67,6 +69,11 @@ export const desktopApi = {
     completed: boolean,
   ) => invoke<Idea>('update_idea', { ideaId, title, content, tags, assetId, completed }),
   deleteIdea: (ideaId: string) => invoke<ProjectBundle>('delete_idea', { ideaId }),
+  createPlanRange: (projectId: string, input: ProjectPlanRangeInput) =>
+    invoke<ProjectBundle>('create_plan_range', { projectId, input }),
+  updatePlanRange: (rangeId: string, input: ProjectPlanRangeInput) =>
+    invoke<ProjectPlanRange>('update_plan_range', { rangeId, input }),
+  deletePlanRange: (rangeId: string) => invoke<ProjectBundle>('delete_plan_range', { rangeId }),
   saveDailySummary: (projectId: string, day: string, summary: string) =>
     invoke<DailySummary>('save_daily_summary', { projectId, day, summary }),
   updateTimelineEvent: (eventId: string, title: string, description: string) =>

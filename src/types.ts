@@ -79,6 +79,28 @@ export interface Idea {
   updatedAt: string
 }
 
+export interface ProjectPlanRange {
+  id: string
+  projectId: string
+  title: string
+  description: string
+  startDate: string
+  endDate: string
+  color: string
+  isDeadline: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ProjectPlanRangeInput {
+  title: string
+  description: string
+  startDate: string
+  endDate: string
+  color: string
+  isDeadline: boolean
+}
+
 export type TimelineEventType =
   | 'project_created'
   | 'asset_imported'
@@ -115,6 +137,7 @@ export interface ProjectBundle {
   assets: Asset[]
   versions: AssetVersion[]
   ideas: Idea[]
+  planRanges: ProjectPlanRange[]
   events: TimelineEvent[]
   summaries: DailySummary[]
 }

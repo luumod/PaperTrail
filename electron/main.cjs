@@ -295,6 +295,19 @@ const initDb = (db) => {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS project_plan_ranges (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      start_date TEXT NOT NULL,
+      end_date TEXT NOT NULL,
+      color TEXT NOT NULL,
+      is_deadline INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS timeline_events (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
@@ -383,6 +396,19 @@ const rowToIdea = (row) => ({
   updatedAt: row[8],
 })
 
+const rowToPlanRange = (row) => ({
+  id: row[0],
+  projectId: row[1],
+  title: row[2],
+  description: row[3],
+  startDate: row[4],
+  endDate: row[5],
+  color: row[6],
+  isDeadline: Boolean(row[7]),
+  createdAt: row[8],
+  updatedAt: row[9],
+})
+
 const rowToEvent = (row) => ({
   id: row[0],
   projectId: row[1],
@@ -436,6 +462,15 @@ const getIdea = (db, ideaId) =>
      FROM ideas WHERE id = ?`,
     [ideaId],
   ).map(rowToIdea)[0]
+
+const getPlanRange = (db, rangeId) =>
+  rows(
+    db,
+    `SELECT id, project_id, title, description, start_date, end_date, color, is_deadline,
+            created_at, updated_at
+     FROM project_plan_ranges WHERE id = ?`,
+    [rangeId],
+  ).map(rowToPlanRange)[0]
 
 const getTimelineEvent = (db, eventId) =>
   rows(
@@ -535,6 +570,13 @@ const getProjectBundle = (db, projectId) => {
        FROM ideas WHERE project_id = ? ORDER BY updated_at DESC`,
       [projectId],
     ).map(rowToIdea),
+    planRanges: rows(
+      db,
+      `SELECT id, project_id, title, description, start_date, end_date, color, is_deadline,
+              created_at, updated_at
+       FROM project_plan_ranges WHERE project_id = ? ORDER BY start_date ASC, end_date ASC`,
+      [projectId],
+    ).map(rowToPlanRange),
     events: rows(
       db,
       `SELECT id, project_id, event_type, title, description, asset_id, idea_id, version_id, event_date
@@ -983,6 +1025,108 @@ handle('delete_idea', async ({ ideaId }) => {
   run(db, 'DELETE FROM ideas WHERE id = ?', [ideaId])
   insertEvent(db, idea.projectId, 'idea_deleted', `Delete idea: ${idea.title}`, idea.content, idea.assetId, ideaId)
   const bundle = getProjectBundle(db, idea.projectId)
+  await saveDb(db, file)
+  return bundle
+})
+
+handle('create_plan_range', async ({ projectId, input }) => {
+  const { db, file } = await openDb()
+  const rangeId = id('plan')
+  const timestamp = now()
+  const startDate = String(input.startDate || '').trim()
+  const endDate = String(input.endDate || '').trim()
+  const title = String(input.title || '').trim()
+
+  if (!title || !startDate || !endDate) {
+    await saveDb(db, file)
+    throw new Error('Plan title, start date, and end date are required.')
+  }
+
+  if (startDate > endDate) {
+    await saveDb(db, file)
+    throw new Error('Plan start date cannot be later than end date.')
+  }
+
+  run(
+    db,
+    `INSERT INTO project_plan_ranges
+     (id, project_id, title, description, start_date, end_date, color, is_deadline, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      rangeId,
+      projectId,
+      title,
+      String(input.description || '').trim(),
+      startDate,
+      endDate,
+      String(input.color || 'blue'),
+      input.isDeadline ? 1 : 0,
+      timestamp,
+      timestamp,
+    ],
+  )
+  run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, projectId])
+  const bundle = getProjectBundle(db, projectId)
+  await saveDb(db, file)
+  return bundle
+})
+
+handle('update_plan_range', async ({ rangeId, input }) => {
+  const { db, file } = await openDb()
+  const existing = getPlanRange(db, rangeId)
+  if (!existing) {
+    await saveDb(db, file)
+    throw new Error(`Plan range not found: ${rangeId}`)
+  }
+
+  const startDate = String(input.startDate || '').trim()
+  const endDate = String(input.endDate || '').trim()
+  const title = String(input.title || '').trim()
+  if (!title || !startDate || !endDate) {
+    await saveDb(db, file)
+    throw new Error('Plan title, start date, and end date are required.')
+  }
+
+  if (startDate > endDate) {
+    await saveDb(db, file)
+    throw new Error('Plan start date cannot be later than end date.')
+  }
+
+  const timestamp = now()
+  run(
+    db,
+    `UPDATE project_plan_ranges
+     SET title = ?, description = ?, start_date = ?, end_date = ?, color = ?, is_deadline = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      title,
+      String(input.description || '').trim(),
+      startDate,
+      endDate,
+      String(input.color || 'blue'),
+      input.isDeadline ? 1 : 0,
+      timestamp,
+      rangeId,
+    ],
+  )
+  run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, existing.projectId])
+  const updated = getPlanRange(db, rangeId)
+  await saveDb(db, file)
+  return updated
+})
+
+handle('delete_plan_range', async ({ rangeId }) => {
+  const { db, file } = await openDb()
+  const existing = getPlanRange(db, rangeId)
+  if (!existing) {
+    await saveDb(db, file)
+    throw new Error(`Plan range not found: ${rangeId}`)
+  }
+
+  const timestamp = now()
+  run(db, 'DELETE FROM project_plan_ranges WHERE id = ?', [rangeId])
+  run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, existing.projectId])
+  const bundle = getProjectBundle(db, existing.projectId)
   await saveDb(db, file)
   return bundle
 })
