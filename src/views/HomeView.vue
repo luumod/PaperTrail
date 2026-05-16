@@ -11,6 +11,9 @@ import type { Project, ProjectStage } from '@/types'
 const router = useRouter()
 const workbench = useWorkbenchStore()
 const editingProjectId = ref('')
+const coverTargetId = ref('')
+const coverInput = ref<HTMLInputElement | null>(null)
+const selectingCover = ref(false)
 
 const editForm = reactive({
   title: '',
@@ -29,6 +32,15 @@ const projectCards = computed(() =>
 )
 
 const formatDate = (value: string) => new Date(value).toLocaleDateString()
+
+const coverUrl = (coverPath: string) => {
+  if (!coverPath) return ''
+  if (/^(data:|https?:|file:|paper-cover:)/i.test(coverPath)) return coverPath
+  return `paper-cover://local/${encodeURIComponent(coverPath)}`
+}
+
+const coverStyle = (coverPath: string) =>
+  coverPath ? { backgroundImage: `url("${coverUrl(coverPath)}")` } : {}
 
 const openProject = async (projectId: string) => {
   await workbench.selectProject(projectId)
@@ -66,18 +78,41 @@ const saveEdit = async () => {
   editingProjectId.value = ''
 }
 
-const setCover = async (projectId: string, event: Event) => {
+const triggerCoverUpload = async (projectId: string) => {
+  if (selectingCover.value || workbench.loading) return
+
+  coverTargetId.value = projectId
+
+  if (workbench.usingDesktop) {
+    selectingCover.value = true
+    try {
+      await workbench.setProjectCover(projectId, '')
+    } finally {
+      selectingCover.value = false
+      coverTargetId.value = ''
+    }
+    return
+  }
+
+  coverInput.value?.click()
+}
+
+const handleCoverFile = async (event: Event) => {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
-  input.value = ''
 
-  if (!file) return
+  if (!file || !coverTargetId.value) {
+    input.value = ''
+    return
+  }
 
   const reader = new FileReader()
   reader.onload = async () => {
     if (typeof reader.result === 'string') {
-      await workbench.setProjectCover(projectId, reader.result)
+      await workbench.setProjectCover(coverTargetId.value, reader.result)
     }
+    input.value = ''
+    coverTargetId.value = ''
   }
   reader.readAsDataURL(file)
 }
@@ -96,54 +131,75 @@ const setCover = async (projectId: string, event: Event) => {
       </button>
     </header>
 
+    <input
+      ref="coverInput"
+      class="visually-hidden"
+      type="file"
+      accept="image/*"
+      @change="handleCoverFile"
+    />
+
     <div v-if="projectCards.length" class="project-card-grid">
       <article v-for="{ project, metrics } in projectCards" :key="project.id" class="project-card">
-        <div class="project-cover" :style="project.coverPath ? { backgroundImage: `url(${project.coverPath})` } : {}">
-          <span v-if="!project.coverPath">{{ project.title.slice(0, 2).toUpperCase() }}</span>
+        <div
+          class="project-cover"
+          :class="{ 'has-image': project.coverPath }"
+          :style="coverStyle(project.coverPath)"
+          :title="project.coverPath ? 'Click to change cover' : 'Click to upload cover'"
+          @click="triggerCoverUpload(project.id)"
+        >
+          <span v-if="!project.coverPath" class="cover-placeholder">
+            {{ project.title.slice(0, 2).toUpperCase() }}
+          </span>
+          <span class="cover-overlay">
+            {{ project.coverPath ? 'Change Cover' : 'Upload Cover' }}
+          </span>
         </div>
 
         <div class="project-card-body">
           <div class="project-card-title">
-            <div>
-              <h2>{{ project.title }}</h2>
-              <p>{{ project.researchDirection || 'Research direction not set' }}</p>
-            </div>
-            <span class="stage-pill">{{ getProjectStageLabel(project.stage) }}</span>
+            <h2>{{ project.title }}</h2>
+            <span class="stage-pill" :class="`stage-${project.stage}`">
+              {{ getProjectStageLabel(project.stage) }}
+            </span>
           </div>
 
-          <dl class="project-meta">
-            <div>
-              <dt>Target venue</dt>
-              <dd>{{ project.targetVenue || 'Not set' }}</dd>
-            </div>
-            <div>
-              <dt>Created</dt>
-              <dd>{{ formatDate(project.createdAt) }}</dd>
-            </div>
-            <div>
-              <dt>Updated</dt>
-              <dd>{{ formatDate(project.updatedAt) }}</dd>
-            </div>
-            <div>
-              <dt>Assets</dt>
-              <dd>{{ metrics.assetCount }}</dd>
-            </div>
-            <div>
-              <dt>Timeline days</dt>
-              <dd>{{ metrics.timelineDays }}</dd>
-            </div>
-          </dl>
+          <p class="project-direction">
+            {{ project.researchDirection || 'Research direction not set' }}
+          </p>
 
-          <p class="project-description">{{ project.description || 'No project note yet.' }}</p>
+          <p class="project-description">
+            {{ project.description || 'No project note yet.' }}
+          </p>
+
+          <div class="project-meta-chips">
+            <span v-if="project.targetVenue" class="meta-chip">
+              {{ project.targetVenue }}
+            </span>
+            <span class="meta-chip">
+              {{ metrics.assetCount }} assets
+            </span>
+            <span class="meta-chip">
+              {{ metrics.timelineDays }} days
+            </span>
+            <span class="meta-chip">
+              {{ formatDate(project.updatedAt) }}
+            </span>
+          </div>
 
           <div class="card-actions">
-            <button type="button" class="primary-button" @click="openProject(project.id)">Open</button>
-            <button type="button" @click="startEdit(project)">Edit</button>
-            <label class="file-action">
+            <button type="button" class="primary-button" @click="openProject(project.id)">
+              Open
+            </button>
+            <button type="button" @click="startEdit(project)">
+              Edit
+            </button>
+            <button type="button" :disabled="selectingCover" @click.stop="triggerCoverUpload(project.id)">
               Cover
-              <input class="visually-hidden" type="file" accept="image/*" @change="setCover(project.id, $event)" />
-            </label>
-            <button type="button" @click="workbench.exportProjectPackage(project.id)">Export</button>
+            </button>
+            <button type="button" @click="workbench.exportProjectPackage(project.id)">
+              Export
+            </button>
           </div>
 
           <form v-if="editingProjectId === project.id" class="project-edit-form" @submit.prevent="saveEdit">

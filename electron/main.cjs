@@ -1,13 +1,25 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron')
+const { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } = require('electron')
 const fs = require('node:fs')
 const fsp = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
+const { pathToFileURL } = require('node:url')
 const initSqlJs = require('sql.js')
 
 let mainWindow = null
 let currentWorkspace = ''
 let sqlPromise = null
+
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'paper-cover',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+    },
+  },
+])
 
 const now = () => new Date().toISOString()
 const id = (prefix) => `${prefix}_${crypto.randomUUID()}`
@@ -551,6 +563,19 @@ const createWindow = async () => {
   } else {
     await mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'))
   }
+}
+
+const registerLocalFileProtocol = () => {
+  protocol.handle('paper-cover', (request) => {
+    const url = new URL(request.url)
+    const targetPath = decodeURIComponent(url.pathname.replace(/^\/+/, ''))
+
+    if (!targetPath || !path.isAbsolute(targetPath)) {
+      return new Response('Invalid cover path', { status: 400 })
+    }
+
+    return net.fetch(pathToFileURL(targetPath).toString())
+  })
 }
 
 const handle = (channel, fn) => {
@@ -1153,7 +1178,10 @@ handle('export_project_package', async ({ projectId }) => {
   return result.filePath
 })
 
-app.whenReady().then(createWindow)
+app.whenReady().then(async () => {
+  registerLocalFileProtocol()
+  await createWindow()
+})
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
