@@ -8,6 +8,7 @@ import type {
   AssetVersion,
   DailySummary,
   Idea,
+  NewAssetFileInput,
   Project,
   ProjectInput,
   ProjectMetrics,
@@ -109,6 +110,20 @@ const detectType = (name: string, mimeType = ''): AssetType => {
   }
   if (['csv', 'tsv', 'xlsx', 'xls', 'json'].includes(ext)) return 'data'
   return 'other'
+}
+
+const newAssetFileSpecs: Record<NewAssetFileInput['fileType'], { extension: string; assetType: AssetType }> = {
+  md: { extension: 'md', assetType: 'markdown' },
+  docx: { extension: 'docx', assetType: 'word' },
+  pptx: { extension: 'pptx', assetType: 'slides' },
+  xlsx: { extension: 'xlsx', assetType: 'data' },
+}
+
+const normalizeNewFileName = (input: NewAssetFileInput) => {
+  const spec = newAssetFileSpecs[input.fileType]
+  const cleaned = input.fileName.trim().replace(/[\\/]+/g, '-')
+  const stem = cleaned.replace(/\.[^.]+$/, '') || 'Untitled'
+  return `${stem}.${spec.extension}`
 }
 
 const emptyLocalState = (): LocalState => ({
@@ -635,6 +650,73 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
     }, 'Failed to import assets')
 
+  const createAssetFile = async (input: NewAssetFileInput) =>
+    runAction(async () => {
+      if (!activeProjectId.value) return
+
+      const fileName = normalizeNewFileName(input)
+      if (!fileName.trim()) {
+        throw new Error('File name is required.')
+      }
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.createAssetFile(activeProjectId.value, input)
+        setBundle(bundle)
+        projects.value = await desktopApi.listProjects()
+        return
+      }
+
+      const spec = newAssetFileSpecs[input.fileType]
+      const timestamp = nowIso()
+      const assetId = makeId('asset')
+      const versionId = makeId('version')
+      const asset: Asset = {
+        id: assetId,
+        projectId: activeProjectId.value,
+        title: fileName,
+        originalName: fileName,
+        fileName,
+        filePath: fileName,
+        fileType: spec.assetType,
+        mimeType: '',
+        sizeBytes: 0,
+        tags: [],
+        currentVersionId: versionId,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      assets.value = [asset, ...assets.value]
+      versions.value = [
+        {
+          id: versionId,
+          assetId,
+          label: 'v1',
+          fileName,
+          filePath: fileName,
+          sizeBytes: 0,
+          note: 'Initial blank file. Desktop mode creates the real file.',
+          createdAt: timestamp,
+        },
+        ...versions.value,
+      ]
+      events.value = [
+        {
+          id: makeId('event'),
+          projectId: activeProjectId.value,
+          eventType: 'asset_imported',
+          title: `Create asset: ${fileName}`,
+          description: fileName,
+          assetId,
+          ideaId: null,
+          versionId,
+          eventDate: timestamp,
+        },
+        ...events.value,
+      ]
+      persistLocal()
+    }, 'Failed to create file')
+
   const deleteAsset = async (assetId: string) =>
     runAction(async () => {
       const asset = assets.value.find((item) => item.id === assetId)
@@ -1135,6 +1217,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     selectProject,
     toggleAssetTypeFilter,
     importAssets,
+    createAssetFile,
     deleteAsset,
     openAsset,
     revealAsset,

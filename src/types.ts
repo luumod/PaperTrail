@@ -2,6 +2,13 @@ export type AssetType = 'pdf' | 'word' | 'slides' | 'markdown' | 'image' | 'data
 
 export type AssetSummaryKey = 'md' | 'ppt' | 'images' | 'papers' | 'word' | 'data' | 'other'
 
+export type NewAssetFileType = 'md' | 'docx' | 'pptx' | 'xlsx'
+
+export interface NewAssetFileInput {
+  fileType: NewAssetFileType
+  fileName: string
+}
+
 export type ProjectStage =
   | 'idea'
   | 'survey'

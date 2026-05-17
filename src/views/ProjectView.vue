@@ -2,7 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProjectStageLabel, useWorkbenchStore } from '@/stores/workbench'
-import type { AssetSummaryKey, Idea, ProjectPlanRange, TimelineEvent, TimelineExportFormat } from '@/types'
+import type {
+  AssetSummaryKey,
+  Idea,
+  NewAssetFileInput,
+  ProjectPlanRange,
+  TimelineEvent,
+  TimelineExportFormat,
+} from '@/types'
 
 const route = useRoute()
 const workbench = useWorkbenchStore()
@@ -20,8 +27,14 @@ const versionForm = reactive({
   note: '',
 })
 
+const createFileForm = reactive<NewAssetFileInput>({
+  fileType: 'md',
+  fileName: '',
+})
+
 const summariesDraft = reactive<Record<string, string>>({})
 const isAssetModalOpen = ref(false)
+const isCreateFileModalOpen = ref(false)
 const assetRefreshTimer = ref<number | null>(null)
 const versionError = ref('')
 const editingTimelineId = ref('')
@@ -79,6 +92,12 @@ watch(
 
 const selectedAssetVersions = computed(() => workbench.assetVersions)
 const today = computed(() => new Date().toISOString().slice(0, 10))
+const createFileTypeOptions: Array<{ value: NewAssetFileInput['fileType']; label: string }> = [
+  { value: 'md', label: 'Markdown (.md)' },
+  { value: 'docx', label: 'Word (.docx)' },
+  { value: 'pptx', label: 'PowerPoint (.pptx)' },
+  { value: 'xlsx', label: 'Excel (.xlsx)' },
+]
 const msPerDay = 24 * 60 * 60 * 1000
 const planLabelWidth = 170
 const defaultPlanVisibleDays = 60
@@ -477,6 +496,30 @@ const chooseImport = async () => {
   fileInput.value?.click()
 }
 
+const openCreateFileModal = () => {
+  createFileForm.fileType = 'md'
+  createFileForm.fileName = ''
+  isCreateFileModalOpen.value = true
+}
+
+const closeCreateFileModal = () => {
+  isCreateFileModalOpen.value = false
+  createFileForm.fileName = ''
+}
+
+const createAssetFile = async () => {
+  if (!createFileForm.fileName.trim()) {
+    workbench.error = 'File name is required.'
+    return
+  }
+
+  await workbench.createAssetFile({
+    fileType: createFileForm.fileType,
+    fileName: createFileForm.fileName.trim(),
+  })
+  closeCreateFileModal()
+}
+
 const importBrowserFiles = async (event: Event) => {
   const input = event.target as HTMLInputElement
   await workbench.importAssets(input.files)
@@ -729,6 +772,9 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         <input v-model="workbench.searchQuery" type="search" placeholder="Search title, tag, type, or idea" />
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseImport">
           Import Assets
+        </button>
+        <button type="button" :disabled="workbench.loading" @click="openCreateFileModal">
+          New File
         </button>
         <input ref="fileInput" class="visually-hidden" type="file" multiple @change="importBrowserFiles" />
       </div>
@@ -1088,6 +1134,45 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         </p>
       </section>
     </div>
+
+    <Teleport to="body">
+      <div
+        v-if="isCreateFileModalOpen"
+        class="modal-backdrop"
+        role="presentation"
+        @click.self="closeCreateFileModal"
+      >
+        <section class="asset-modal create-file-modal" role="dialog" aria-modal="true" aria-labelledby="create-file-title">
+          <header class="modal-header">
+            <div>
+              <p class="eyebrow">New Asset File</p>
+              <h2 id="create-file-title">Create file in workspace</h2>
+              <p>The file will be created inside this project and added to Asset Library.</p>
+            </div>
+            <button type="button" class="icon-button close-button" title="Close" @click="closeCreateFileModal">x</button>
+          </header>
+
+          <form class="create-file-form" @submit.prevent="createAssetFile">
+            <label>
+              File type
+              <select v-model="createFileForm.fileType">
+                <option v-for="option in createFileTypeOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
+              </select>
+            </label>
+            <label>
+              File name
+              <input v-model="createFileForm.fileName" type="text" placeholder="AAAI-2027-draft" autofocus />
+            </label>
+            <div class="button-row">
+              <button type="submit" class="primary-button" :disabled="workbench.loading">Create</button>
+              <button type="button" @click="closeCreateFileModal">Cancel</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </Teleport>
 
     <Teleport to="body">
       <div

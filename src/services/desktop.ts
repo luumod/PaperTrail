@@ -2,6 +2,7 @@ import type {
   Asset,
   DailySummary,
   Idea,
+  NewAssetFileInput,
   Project,
   ProjectInput,
   ProjectPlanRange,
@@ -45,6 +46,8 @@ export const desktopApi = {
   getProjectBundle: (projectId: string) =>
     invoke<ProjectBundle>('get_project_bundle', { projectId }),
   importAssets: (projectId: string) => invoke<Asset[]>('import_assets', { projectId }),
+  createAssetFile: (projectId: string, input: NewAssetFileInput) =>
+    invoke<ProjectBundle>('create_asset_file', { projectId, input }),
   deleteAsset: (assetId: string) => invoke<ProjectBundle>('delete_asset', { assetId }),
   openAsset: (assetId: string) => invoke<void>('open_asset', { assetId }),
   revealAsset: (assetId: string) => invoke<void>('reveal_asset', { assetId }),

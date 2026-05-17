@@ -1542,6 +1542,18 @@ label.file-action:hover {
   animation: slideUp var(--duration-slow) var(--ease-out);
 }
 
+.create-file-modal {
+  width: min(560px, 100%);
+}
+
+.create-file-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 @keyframes slideUp {
   from {
     opacity: 0;

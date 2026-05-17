@@ -38,6 +38,50 @@ const uniqueFileName = (originalName) => {
   return `${suffix}_${safeName(parsed.name)}${parsed.ext ? safeName(parsed.ext) : ''}`
 }
 
+const newAssetFileSpecs = {
+  md: { extension: '.md', assetType: 'markdown', mimeType: 'text/markdown' },
+  docx: {
+    extension: '.docx',
+    assetType: 'word',
+    mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  },
+  pptx: {
+    extension: '.pptx',
+    assetType: 'slides',
+    mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  },
+  xlsx: {
+    extension: '.xlsx',
+    assetType: 'data',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  },
+}
+
+const normalizeCreatedFileName = (input = {}) => {
+  const spec = newAssetFileSpecs[input.fileType]
+  if (!spec) throw new Error('Unsupported file type.')
+
+  const cleaned = String(input.fileName || '')
+    .trim()
+    .replace(/[\\/]+/g, '-')
+  const parsed = path.parse(cleaned || 'Untitled')
+  const stem = safeName(parsed.name || cleaned || 'Untitled')
+  return `${stem}${spec.extension}`
+}
+
+const uniqueCreatedFileName = async (directory, desiredName) => {
+  const parsed = path.parse(desiredName)
+  let candidate = `${parsed.name}${parsed.ext}`
+  let index = 2
+
+  while (fs.existsSync(path.join(directory, candidate))) {
+    candidate = `${parsed.name}-${index}${parsed.ext}`
+    index += 1
+  }
+
+  return candidate
+}
+
 const versionArchiveName = async (directory, originalName, label, note) => {
   const parsed = path.parse(originalName || 'asset')
   const stem = safeName(parsed.name)
@@ -153,6 +197,124 @@ const createZip = (files) => {
   end.writeUInt16LE(0, 20)
 
   return Buffer.concat([...localParts, ...centralParts, end])
+}
+
+const buildBlankDocx = () =>
+  createZip([
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    },
+    {
+      name: 'word/document.xml',
+      data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p/><w:sectPr/></w:body>
+</w:document>`,
+    },
+  ])
+
+const buildBlankXlsx = () =>
+  createZip([
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`,
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`,
+    },
+    {
+      name: 'xl/workbook.xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+</workbook>`,
+    },
+    {
+      name: 'xl/_rels/workbook.xml.rels',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`,
+    },
+    {
+      name: 'xl/worksheets/sheet1.xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>`,
+    },
+  ])
+
+const buildBlankPptx = () =>
+  createZip([
+    {
+      name: '[Content_Types].xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>
+</Types>`,
+    },
+    {
+      name: '_rels/.rels',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+</Relationships>`,
+    },
+    {
+      name: 'ppt/presentation.xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <p:sldIdLst><p:sldId id="256" r:id="rId1"/></p:sldIdLst>
+  <p:sldSz cx="9144000" cy="5143500" type="screen16x9"/>
+</p:presentation>`,
+    },
+    {
+      name: 'ppt/_rels/presentation.xml.rels',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>
+</Relationships>`,
+    },
+    {
+      name: 'ppt/slides/slide1.xml',
+      data: `<?xml version="1.0" encoding="UTF-8"?>
+<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">
+  <p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/><a:chOff x="0" y="0"/><a:chExt cx="0" cy="0"/></a:xfrm></p:grpSpPr></p:spTree></p:cSld>
+</p:sld>`,
+    },
+  ])
+
+const buildBlankAssetFile = (fileType) => {
+  if (fileType === 'md') return Buffer.from('# Untitled\n', 'utf8')
+  if (fileType === 'docx') return buildBlankDocx()
+  if (fileType === 'pptx') return buildBlankPptx()
+  if (fileType === 'xlsx') return buildBlankXlsx()
+  throw new Error('Unsupported file type.')
 }
 
 const tagsToJson = (tags) => JSON.stringify(Array.isArray(tags) ? tags : [])
@@ -825,6 +987,77 @@ handle('import_assets', async ({ projectId }) => {
 
   await saveDb(db, file)
   return imported
+})
+
+handle('create_asset_file', async ({ projectId, input }) => {
+  const requestedName = String(input?.fileName || '').trim()
+  if (!requestedName) throw new Error('File name is required.')
+
+  const { db, file } = await openDb()
+  const project = getProject(db, projectId)
+  if (!project) {
+    await saveDb(db, file)
+    throw new Error(`Project not found: ${projectId}`)
+  }
+
+  const spec = newAssetFileSpecs[input.fileType]
+  if (!spec) {
+    await saveDb(db, file)
+    throw new Error('Unsupported file type.')
+  }
+
+  const assetDir = path.join(project.workspacePath, 'assets')
+  await fsp.mkdir(assetDir, { recursive: true })
+  const originalName = normalizeCreatedFileName(input)
+  const fileName = await uniqueCreatedFileName(assetDir, originalName)
+  const destination = path.join(assetDir, fileName)
+  await fsp.writeFile(destination, buildBlankAssetFile(input.fileType))
+
+  const stat = await fsp.stat(destination)
+  const assetId = id('asset')
+  const versionId = id('version')
+  const timestamp = now()
+  const modifiedAt = stat.mtime.toISOString()
+  const versionDir = path.join(project.workspacePath, 'versions', assetId)
+  await fsp.mkdir(versionDir, { recursive: true })
+  const versionFileName = await versionArchiveName(versionDir, fileName, 'v1', 'initial-file')
+  const versionDestination = path.join(versionDir, versionFileName)
+  await fsp.copyFile(destination, versionDestination)
+
+  run(
+    db,
+    `INSERT INTO assets
+     (id, project_id, title, original_name, file_name, file_path, file_type, mime_type,
+      size_bytes, tags, current_version_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      assetId,
+      projectId,
+      fileName,
+      fileName,
+      fileName,
+      destination,
+      spec.assetType,
+      spec.mimeType,
+      stat.size,
+      '[]',
+      versionId,
+      timestamp,
+      modifiedAt,
+    ],
+  )
+  run(
+    db,
+    `INSERT INTO asset_versions
+     (id, asset_id, label, file_name, file_path, size_bytes, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [versionId, assetId, 'v1', versionFileName, versionDestination, stat.size, 'Initial blank file', timestamp],
+  )
+  run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, projectId])
+  insertEvent(db, projectId, 'asset_imported', `Create asset: ${fileName}`, destination, assetId, null, versionId)
+  const bundle = getProjectBundle(db, projectId)
+  await saveDb(db, file)
+  return bundle
 })
 
 handle('delete_asset', async ({ assetId }) => {
