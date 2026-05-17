@@ -877,9 +877,16 @@ label.file-action:hover {
   background:
     linear-gradient(180deg, rgba(248, 250, 252, 0.9), rgba(255, 255, 255, 0.96)),
     var(--color-surface);
-  cursor: grab;
+  cursor: default;
   user-select: none;
   touch-action: none;
+  transition: border-color var(--duration-fast) var(--ease-out), box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.plan-timeline-wrap.focused {
+  border-color: #bfdbfe;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+  cursor: grab;
 }
 
 .plan-timeline-wrap.dragging {
@@ -1038,7 +1045,6 @@ label.file-action:hover {
   min-height: 58px;
   background-image: linear-gradient(to right, rgba(148, 163, 184, 0.22) 1px, transparent 1px);
   background-size: var(--plan-day-width) 100%;
-  cursor: inherit;
 }
 
 .plan-placeholder-row .plan-row-label strong,
@@ -1170,7 +1176,7 @@ label.file-action:hover {
   display: grid;
   grid-template-columns: minmax(260px, 0.85fr) minmax(320px, 1.15fr);
   gap: var(--space-lg);
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel {
@@ -1179,6 +1185,13 @@ label.file-action:hover {
 
 .timeline-panel {
   grid-column: 1 / -1;
+}
+
+.asset-library,
+.idea-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 620px;
 }
 
 /* Asset Summary */
@@ -1215,8 +1228,9 @@ label.file-action:hover {
 /* Asset List */
 .asset-list {
   display: grid;
+  align-content: start;
   gap: var(--space-sm);
-  max-height: 560px;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -1307,10 +1321,20 @@ label.file-action:hover {
 
 .idea-list {
   display: grid;
+  align-content: start;
   gap: 9px;
-  max-height: 420px;
+  min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+.asset-library > .empty-copy,
+.idea-panel > .empty-copy {
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  place-items: center;
+  margin: 0;
 }
 
 .version-list article,
@@ -1587,8 +1611,98 @@ label.file-action:hover {
 }
 
 /* ===== Timeline ===== */
-.day-group {
-  margin-bottom: var(--space-md);
+.timeline-month-list {
+  display: grid;
+  gap: var(--space-lg);
+}
+
+.timeline-month {
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+.timeline-month-header {
+  display: flex;
+  gap: var(--space-md);
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border-light);
+  padding: var(--space-md) var(--space-lg);
+  background: linear-gradient(180deg, #f8fafc, #ffffff);
+}
+
+.timeline-month-header h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.timeline-month-header span {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.timeline-month .day-group {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-light);
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.timeline-month .day-group:last-child {
+  border-bottom: 0;
+}
+
+.day-toggle {
+  display: flex;
+  width: 100%;
+  gap: var(--space-md);
+  align-items: center;
+  border: 0;
+  border-radius: 0;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--color-surface);
+  text-align: left;
+}
+
+.day-toggle:hover {
+  background: var(--color-surface-hover);
+  box-shadow: none;
+}
+
+.day-toggle span {
+  display: grid;
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: var(--radius-full);
+  color: var(--color-brand);
+  background: var(--color-info-bg);
+  font-weight: 800;
+}
+
+.day-toggle strong {
+  flex: 1;
+}
+
+.day-toggle em {
+  color: var(--color-text-muted);
+  font-size: 0.78rem;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.day-detail {
+  display: grid;
+  gap: var(--space-md);
+  border-top: 1px solid var(--color-border-light);
+  padding: var(--space-md) var(--space-lg) var(--space-lg);
+  background: #fcfdff;
 }
 
 .day-group h3 {
@@ -1600,7 +1714,7 @@ label.file-action:hover {
 .day-group ol {
   display: grid;
   gap: var(--space-sm);
-  margin: var(--space-md) 0 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }

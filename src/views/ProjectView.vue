@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProjectStageLabel, useWorkbenchStore } from '@/stores/workbench'
 import type { AssetSummaryKey, Idea, ProjectPlanRange, TimelineEvent, TimelineExportFormat } from '@/types'
@@ -24,11 +24,11 @@ const summariesDraft = reactive<Record<string, string>>({})
 const isAssetModalOpen = ref(false)
 const assetRefreshTimer = ref<number | null>(null)
 const versionError = ref('')
-const timelinePage = ref(1)
 const editingTimelineId = ref('')
 const editingIdeaId = ref('')
 const editingPlanRangeId = ref('')
 const isProjectSwitching = ref(false)
+const expandedTimelineDays = ref<string[]>([])
 
 const timelineEditForm = reactive({
   title: '',
@@ -84,9 +84,11 @@ const planLabelWidth = 170
 const defaultPlanVisibleDays = 60
 const minPlanVisibleDays = 7
 const maxPlanVisibleDays = 540
+const planTimelineRef = ref<HTMLElement | null>(null)
 const planTrackRef = ref<HTMLElement | null>(null)
 const planViewportStart = ref('')
 const planVisibleDays = ref(defaultPlanVisibleDays)
+const isPlanTimelineFocused = ref(false)
 const isPlanDragging = ref(false)
 const planDragStartX = ref(0)
 const planDragStartDate = ref('')
@@ -269,6 +271,9 @@ const focusPlanWindow = (startDate: string, endDate: string) => {
 }
 
 const zoomPlanTimeline = (event: WheelEvent) => {
+  if (!isPlanTimelineFocused.value) return
+
+  event.preventDefault()
   const rect = planTrackRef.value?.getBoundingClientRect()
   const pointerRatio = rect ? clamp((event.clientX - rect.left) / rect.width, 0, 1) : 0.5
   const oldDays = planVisibleDays.value
@@ -286,6 +291,7 @@ const startPlanPan = (event: PointerEvent) => {
   const target = event.target as HTMLElement
   if (target.closest('button, input, textarea, select, .plan-range-popover')) return
 
+  isPlanTimelineFocused.value = true
   isPlanDragging.value = true
   planDragStartX.value = event.clientX
   planDragStartDate.value = planViewportStartDate.value
@@ -309,7 +315,18 @@ const stopPlanPan = (event: PointerEvent) => {
 }
 
 const selectPlanRange = (range: ProjectPlanRange) => {
+  isPlanTimelineFocused.value = true
   selectedPlanRangeId.value = selectedPlanRangeId.value === range.id ? '' : range.id
+}
+
+const blurPlanTimelineIfOutside = (event: PointerEvent) => {
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if (planTimelineRef.value?.contains(target)) return
+
+  isPlanTimelineFocused.value = false
+  isPlanDragging.value = false
+  selectedPlanRangeId.value = ''
 }
 const deadlineTarget = computed(() => {
   const deadlineRanges = sortedPlanRanges.value
@@ -365,42 +382,82 @@ const timelineEventsSorted = computed(() =>
   [...workbench.events].sort((a, b) => a.eventDate.localeCompare(b.eventDate)),
 )
 
-const timelinePageSize = 8
-const timelinePageCount = computed(() =>
-  Math.max(1, Math.ceil(timelineEventsSorted.value.length / timelinePageSize)),
-)
+const timelineMonthGroups = computed(() => {
+  const months = new Map<
+    string,
+    {
+      month: string
+      label: string
+      dayMap: Map<string, TimelineEvent[]>
+    }
+  >()
 
-const pagedTimelineEvents = computed(() => {
-  const start = (timelinePage.value - 1) * timelinePageSize
-  return timelineEventsSorted.value.slice(start, start + timelinePageSize)
-})
-
-const pagedTimelineDays = computed(() => {
-  const grouped = new Map<string, TimelineEvent[]>()
-
-  for (const event of pagedTimelineEvents.value) {
+  for (const event of timelineEventsSorted.value) {
     const day = event.eventDate.slice(0, 10)
-    grouped.set(day, [...(grouped.get(day) ?? []), event])
+    const month = day.slice(0, 7)
+    const existing = months.get(month)
+    const monthGroup =
+      existing ??
+      {
+        month,
+        label: new Date(`${month}-01T00:00:00`).toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'long',
+        }),
+        dayMap: new Map<string, TimelineEvent[]>(),
+      }
+
+    monthGroup.dayMap.set(day, [...(monthGroup.dayMap.get(day) ?? []), event])
+    months.set(month, monthGroup)
   }
 
-  return [...grouped.entries()].map(([day, events]) => ({
-    day,
-    events,
-    summary: summariesDraft[day] ?? '',
+  return [...months.values()].map((monthGroup) => ({
+    month: monthGroup.month,
+    label: monthGroup.label,
+    eventCount: [...monthGroup.dayMap.values()].reduce((sum, events) => sum + events.length, 0),
+    days: [...monthGroup.dayMap.entries()].map(([day, events]) => ({
+      day,
+      events,
+      summary: summariesDraft[day] ?? '',
+    })),
   }))
 })
 
 watch(
-  () => timelineEventsSorted.value.length,
+  () => workbench.activeProjectId,
   () => {
-    timelinePage.value = timelinePageCount.value
+    expandedTimelineDays.value = [today.value]
   },
   { immediate: true },
 )
 
-watch(timelinePageCount, (count) => {
-  if (timelinePage.value > count) timelinePage.value = count
-})
+watch(
+  () => timelineEventsSorted.value.map((event) => event.id).join('|'),
+  () => {
+    const eventDays = timelineEventsSorted.value.map((event) => event.eventDate.slice(0, 10))
+    if (!eventDays.length) {
+      expandedTimelineDays.value = [today.value]
+      return
+    }
+
+    if (eventDays.includes(today.value) && !expandedTimelineDays.value.includes(today.value)) {
+      expandedTimelineDays.value = [...expandedTimelineDays.value, today.value]
+      return
+    }
+
+    if (!expandedTimelineDays.value.some((day) => eventDays.includes(day))) {
+      expandedTimelineDays.value = [eventDays.at(-1) ?? today.value]
+    }
+  },
+  { immediate: true },
+)
+
+const isTimelineDayExpanded = (day: string) => expandedTimelineDays.value.includes(day)
+const toggleTimelineDay = (day: string) => {
+  expandedTimelineDays.value = isTimelineDayExpanded(day)
+    ? expandedTimelineDays.value.filter((item) => item !== day)
+    : [...expandedTimelineDays.value, day]
+}
 
 const ideaCards = computed(() =>
   workbench.filteredIdeas.map((idea) => ({
@@ -452,7 +509,14 @@ const closeAssetDetail = () => {
   workbench.selectedAssetId = ''
 }
 
-onBeforeUnmount(stopAssetRefresh)
+onMounted(() => {
+  window.addEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+})
+
+onBeforeUnmount(() => {
+  stopAssetRefresh()
+  window.removeEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+})
 
 const resetPlanForm = () => {
   editingPlanRangeId.value = ''
@@ -716,13 +780,15 @@ const exportTimeline = async (format: TimelineExportFormat) => {
       </form>
 
       <div
+        ref="planTimelineRef"
         class="plan-timeline-wrap"
         :class="{
           empty: !sortedPlanRanges.length,
           dragging: isPlanDragging,
+          focused: isPlanTimelineFocused,
           'has-selected-range': !!selectedPlanRangeId,
         }"
-        @wheel.prevent="zoomPlanTimeline"
+        @wheel="zoomPlanTimeline"
         @pointerdown="startPlanPan"
         @pointermove="movePlanPan"
         @pointerup="stopPlanPan"
@@ -956,53 +1022,65 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           </div>
         </div>
 
-        <article v-for="day in pagedTimelineDays" :key="day.day" class="day-group">
-          <div class="day-header">
-            <h3>{{ day.day }}</h3>
-            <button type="button" :disabled="workbench.loading" @click="saveSummary(day.day)">Save Summary</button>
-          </div>
-          <textarea
-            v-model="summariesDraft[day.day]"
-            rows="2"
-            placeholder="What happened today? Risks? Next step?"
-          />
-          <ol>
-            <li v-for="event in day.events" :key="event.id">
-              <span>{{ new Date(event.eventDate).toLocaleTimeString() }}</span>
-              <template v-if="editingTimelineId === event.id">
-                <form class="timeline-edit-form" @submit.prevent="saveTimelineEdit">
-                  <input v-model="timelineEditForm.title" type="text" placeholder="Timeline title" />
-                  <textarea v-model="timelineEditForm.description" rows="2" placeholder="Timeline description" />
-                  <div class="button-row">
-                    <button type="submit" class="primary-button">Save</button>
-                    <button type="button" @click="cancelEditTimeline">Cancel</button>
-                  </div>
-                </form>
-              </template>
-              <template v-else>
-                <div class="timeline-event-content">
-                  <strong>{{ event.title }}</strong>
-                  <p>{{ event.description }}</p>
-                </div>
-                <div class="timeline-event-actions">
-                  <button type="button" @click="startEditTimeline(event)">Modify</button>
-                  <button type="button" class="danger-button" @click="deleteTimelineEvent(event.id)">Delete</button>
-                </div>
-              </template>
-            </li>
-          </ol>
-        </article>
+        <div v-if="timelineMonthGroups.length" class="timeline-month-list">
+          <section v-for="month in timelineMonthGroups" :key="month.month" class="timeline-month">
+            <header class="timeline-month-header">
+              <h3>{{ month.label }}</h3>
+              <span>{{ month.days.length }} days | {{ month.eventCount }} events</span>
+            </header>
 
-        <div v-if="timelineEventsSorted.length" class="pagination-row">
-          <button type="button" :disabled="timelinePage <= 1" @click="timelinePage -= 1">Previous</button>
-          <span>Page {{ timelinePage }} / {{ timelinePageCount }}</span>
-          <button
-            type="button"
-            :disabled="timelinePage >= timelinePageCount"
-            @click="timelinePage += 1"
-          >
-            Next
-          </button>
+            <article
+              v-for="day in month.days"
+              :key="day.day"
+              class="day-group"
+              :class="{ collapsed: !isTimelineDayExpanded(day.day) }"
+            >
+              <button type="button" class="day-toggle" @click="toggleTimelineDay(day.day)">
+                <span>{{ isTimelineDayExpanded(day.day) ? '-' : '+' }}</span>
+                <strong>{{ day.day }}</strong>
+                <em>{{ day.events.length }} events</em>
+              </button>
+
+              <div v-if="isTimelineDayExpanded(day.day)" class="day-detail">
+                <div class="day-header">
+                  <h3>{{ day.day }}</h3>
+                  <button type="button" :disabled="workbench.loading" @click="saveSummary(day.day)">
+                    Save Summary
+                  </button>
+                </div>
+                <textarea
+                  v-model="summariesDraft[day.day]"
+                  rows="2"
+                  placeholder="What happened today? Risks? Next step?"
+                />
+                <ol>
+                  <li v-for="event in day.events" :key="event.id">
+                    <span>{{ new Date(event.eventDate).toLocaleTimeString() }}</span>
+                    <template v-if="editingTimelineId === event.id">
+                      <form class="timeline-edit-form" @submit.prevent="saveTimelineEdit">
+                        <input v-model="timelineEditForm.title" type="text" placeholder="Timeline title" />
+                        <textarea v-model="timelineEditForm.description" rows="2" placeholder="Timeline description" />
+                        <div class="button-row">
+                          <button type="submit" class="primary-button">Save</button>
+                          <button type="button" @click="cancelEditTimeline">Cancel</button>
+                        </div>
+                      </form>
+                    </template>
+                    <template v-else>
+                      <div class="timeline-event-content">
+                        <strong>{{ event.title }}</strong>
+                        <p>{{ event.description }}</p>
+                      </div>
+                      <div class="timeline-event-actions">
+                        <button type="button" @click="startEditTimeline(event)">Modify</button>
+                        <button type="button" class="danger-button" @click="deleteTimelineEvent(event.id)">Delete</button>
+                      </div>
+                    </template>
+                  </li>
+                </ol>
+              </div>
+            </article>
+          </section>
         </div>
 
         <p v-if="!timelineEventsSorted.length" class="empty-copy">
