@@ -773,7 +773,7 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseImport">
           Import Assets
         </button>
-        <button type="button" :disabled="workbench.loading" @click="openCreateFileModal">
+        <button type="button" class="primary-button" :disabled="workbench.loading" @click="openCreateFileModal">
           New File
         </button>
         <input ref="fileInput" class="visually-hidden" type="file" multiple @change="importBrowserFiles" />

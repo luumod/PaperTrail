@@ -1533,7 +1533,8 @@ label.file-action:hover {
   gap: var(--space-lg);
   width: min(840px, 100%);
   max-height: min(760px, calc(100vh - 48px));
-  overflow: auto;
+  overflow-y: auto;
+  overflow-x: hidden;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-xl);
@@ -1549,6 +1550,7 @@ label.file-action:hover {
 .create-file-form label {
   display: grid;
   gap: 6px;
+  min-width: 0;
   color: var(--color-text-secondary);
   font-size: 0.84rem;
   font-weight: 700;
