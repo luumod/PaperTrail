@@ -1230,8 +1230,10 @@ label.file-action:hover {
   display: grid;
   align-content: start;
   gap: var(--space-sm);
+  max-height: clamp(280px, 44vh, 480px);
   min-height: 0;
   overflow: auto;
+  padding-right: 4px;
 }
 
 .asset-row {
@@ -1323,6 +1325,7 @@ label.file-action:hover {
   display: grid;
   align-content: start;
   gap: 9px;
+  max-height: clamp(280px, 44vh, 480px);
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
