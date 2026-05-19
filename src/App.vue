@@ -124,7 +124,7 @@ const selectProject = async (projectId: string) => {
 
       <nav class="project-list" aria-label="Projects">
         <button
-          v-for="project in workbench.projects"
+          v-for="project in workbench.visibleProjects"
           :key="project.id"
           type="button"
           :class="{ active: project.id === workbench.activeProjectId }"

@@ -31,6 +31,7 @@ export interface Project {
   tags: string[]
   createdAt: string
   updatedAt: string
+  deletedAt: string | null
 }
 
 export interface ProjectInput {
@@ -110,6 +111,7 @@ export interface ProjectPlanRangeInput {
 
 export type TimelineEventType =
   | 'project_created'
+  | 'project_deleted'
   | 'asset_imported'
   | 'asset_updated'
   | 'version_saved'

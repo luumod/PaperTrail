@@ -415,7 +415,8 @@ const initDb = (db) => {
       workspace_path TEXT NOT NULL,
       tags TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      deleted_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS assets (
@@ -491,6 +492,7 @@ const initDb = (db) => {
       UNIQUE(project_id, day)
     );
   `)
+  ensureColumn(db, 'projects', 'deleted_at', 'TEXT')
   ensureColumn(db, 'ideas', 'completed', 'INTEGER NOT NULL DEFAULT 0')
 }
 
@@ -517,6 +519,7 @@ const rowToProject = (row) => ({
   tags: tagsFromJson(row[8]),
   createdAt: row[9],
   updatedAt: row[10],
+  deletedAt: row[11],
 })
 
 const rowToAsset = (row) => ({
@@ -593,7 +596,7 @@ const rowToSummary = (row) => ({
 
 const selectProjectSql = `
   SELECT id, title, description, research_direction, stage, target_venue, cover_path,
-         workspace_path, tags, created_at, updated_at
+         workspace_path, tags, created_at, updated_at, deleted_at
   FROM projects
 `
 
@@ -702,7 +705,7 @@ const insertEvent = (db, projectId, eventType, title, description, assetId = nul
 }
 
 const listProjects = (db) =>
-  rows(db, `${selectProjectSql} ORDER BY updated_at DESC`).map(rowToProject)
+  rows(db, `${selectProjectSql} WHERE deleted_at IS NULL ORDER BY updated_at DESC`).map(rowToProject)
 
 const getProjectBundle = (db, projectId) => {
   const assets = rows(
@@ -884,6 +887,34 @@ handle('update_project', async ({ projectId, input }) => {
   const project = getProject(db, projectId)
   await saveDb(db, file)
   return project
+})
+
+handle('delete_project', async ({ projectId }) => {
+  const { db, file } = await openDb()
+  const project = getProject(db, projectId)
+  if (!project) {
+    await saveDb(db, file)
+    throw new Error('Project not found')
+  }
+
+  const timestamp = now()
+  run(
+    db,
+    `UPDATE projects
+     SET deleted_at = ?, updated_at = ?
+     WHERE id = ?`,
+    [timestamp, timestamp, projectId],
+  )
+  insertEvent(
+    db,
+    projectId,
+    'project_deleted',
+    `Delete project: ${project.title}`,
+    'Project moved out of the active list. Local files and data are preserved.',
+  )
+  const deletedProject = getProject(db, projectId)
+  await saveDb(db, file)
+  return deletedProject
 })
 
 handle('set_project_cover', async ({ projectId }) => {

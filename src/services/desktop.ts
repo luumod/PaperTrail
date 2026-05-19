@@ -41,6 +41,7 @@ export const desktopApi = {
   createProject: (input: ProjectInput) => invoke<Project>('create_project', { input }),
   updateProject: (projectId: string, input: ProjectInput) =>
     invoke<Project>('update_project', { projectId, input }),
+  deleteProject: (projectId: string) => invoke<Project>('delete_project', { projectId }),
   setProjectCover: (projectId: string) => invoke<Project>('set_project_cover', { projectId }),
   exportProjectPackage: (projectId: string) => invoke<string>('export_project_package', { projectId }),
   getProjectBundle: (projectId: string) =>

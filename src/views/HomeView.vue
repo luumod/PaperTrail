@@ -25,7 +25,7 @@ const editForm = reactive({
 })
 
 const projectCards = computed(() =>
-  workbench.projects.map((project) => ({
+  workbench.visibleProjects.map((project) => ({
     project,
     metrics: workbench.getProjectMetrics(project.id),
   })),
@@ -116,6 +116,14 @@ const handleCoverFile = async (event: Event) => {
   }
   reader.readAsDataURL(file)
 }
+
+const deleteProject = async (project: Project) => {
+  if (!confirm(`Delete "${project.title}" from the active list? Local files and data will be preserved.`)) return
+  if (editingProjectId.value === project.id) {
+    cancelEdit()
+  }
+  await workbench.deleteProject(project.id)
+}
 </script>
 
 <template>
@@ -199,6 +207,9 @@ const handleCoverFile = async (event: Event) => {
             </button>
             <button type="button" @click="workbench.exportProjectPackage(project.id)">
               Export
+            </button>
+            <button type="button" class="danger-button" @click="deleteProject(project)">
+              Delete
             </button>
           </div>
 

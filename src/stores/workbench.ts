@@ -67,6 +67,7 @@ const normalizeProject = (project: Partial<Project> & Pick<Project, 'id' | 'titl
   tags: project.tags ?? [],
   createdAt: project.createdAt ?? nowIso(),
   updatedAt: project.updatedAt ?? project.createdAt ?? nowIso(),
+  deletedAt: project.deletedAt ?? null,
 })
 
 const normalizeIdea = (
@@ -175,8 +176,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const dataRevision = ref(0)
 
   const usingDesktop = computed(() => isDesktopRuntime())
+  const visibleProjects = computed(() => projects.value.filter((project) => !project.deletedAt))
   const activeProject = computed(
-    () => projects.value.find((project) => project.id === activeProjectId.value) ?? null,
+    () => visibleProjects.value.find((project) => project.id === activeProjectId.value) ?? null,
   )
   const selectedAsset = computed(
     () => assets.value.find((asset) => asset.id === selectedAssetId.value) ?? null,
@@ -344,7 +346,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           const snapshot = await desktopApi.setWorkspace(storedWorkspace)
           workspacePath.value = snapshot.workspacePath
           projects.value = snapshot.projects
-          activeProjectId.value = snapshot.projects[0]?.id ?? ''
+          activeProjectId.value = visibleProjects.value[0]?.id ?? ''
           await refreshProjectBundle(activeProjectId.value)
         }
         return
@@ -353,7 +355,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const local = loadLocalState()
       workspacePath.value = local.workspacePath
       projects.value = local.projects
-      activeProjectId.value = local.activeProjectId || local.projects[0]?.id || ''
+      activeProjectId.value = local.projects.some((project) => project.id === local.activeProjectId && !project.deletedAt)
+        ? local.activeProjectId
+        : visibleProjects.value[0]?.id || ''
       await refreshProjectBundle(activeProjectId.value)
     }, 'Failed to initialize workbench')
 
@@ -372,7 +376,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       workspacePath.value = snapshot.workspacePath
       projects.value = snapshot.projects
       localStorage.setItem(WORKSPACE_KEY, snapshot.workspacePath)
-      activeProjectId.value = snapshot.projects[0]?.id ?? ''
+      activeProjectId.value = visibleProjects.value[0]?.id ?? ''
       await refreshProjectBundle(activeProjectId.value)
       return snapshot
     }, 'Failed to choose workspace')
@@ -400,6 +404,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         tags: input.tags,
         createdAt: timestamp,
         updatedAt: timestamp,
+        deletedAt: null,
       }
 
       const event: TimelineEvent = {
@@ -470,6 +475,52 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
       return updatedProject
     }, 'Failed to update project')
+
+  const deleteProject = async (projectId: string) =>
+    runAction(async () => {
+      const project = projects.value.find((item) => item.id === projectId)
+      if (!project) return null
+
+      const timestamp = nowIso()
+
+      if (usingDesktop.value) {
+        const deletedProject = await desktopApi.deleteProject(projectId)
+        projects.value = projects.value.map((item) => (item.id === projectId ? deletedProject : item))
+      } else {
+        projects.value = projects.value.map((item) =>
+          item.id === projectId
+            ? {
+                ...item,
+                updatedAt: timestamp,
+                deletedAt: timestamp,
+              }
+            : item,
+        )
+
+        const local = loadLocalState()
+        const deleteEvent: TimelineEvent = {
+          id: makeId('event'),
+          projectId,
+          eventType: 'project_deleted',
+          title: `Delete project: ${project.title}`,
+          description: 'Project moved out of the active list. Local files and data are preserved.',
+          assetId: null,
+          ideaId: null,
+          versionId: null,
+          eventDate: timestamp,
+        }
+        local.events = [deleteEvent, ...local.events]
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(local))
+      }
+
+      if (activeProjectId.value === projectId) {
+        activeProjectId.value = visibleProjects.value[0]?.id ?? ''
+        await refreshProjectBundle(activeProjectId.value)
+      }
+
+      persistLocal()
+      return project
+    }, 'Failed to delete project')
 
   const setProjectCover = async (projectId: string, coverPath: string) =>
     runAction(async () => {
@@ -1188,6 +1239,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   return {
     workspacePath,
     projects,
+    visibleProjects,
     activeProjectId,
     assets,
     versions,
@@ -1211,6 +1263,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     chooseWorkspace,
     createProject,
     updateProject,
+    deleteProject,
     setProjectCover,
     getProjectMetrics,
     exportProjectPackage,
