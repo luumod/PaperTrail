@@ -65,7 +65,7 @@ const selectProject = async (projectId: string) => {
         <span class="brand-mark">PT</span>
         <span>
           <strong>Paper Timeline Workbench</strong>
-          <small>Local research process manager</small>
+          <small>Local timeline and knowledge manager</small>
         </span>
       </RouterLink>
 
@@ -95,20 +95,30 @@ const selectProject = async (projectId: string) => {
 
       <section class="new-project">
         <div class="section-title">
-          <span>New Project</span>
+          <span>New Space</span>
+        </div>
+        <p class="new-project-copy">
+          Track a paper, work stream, study plan, meeting series, or daily journal in one timeline.
+        </p>
+        <div class="use-case-row" aria-label="Example spaces">
+          <span>Work</span>
+          <span>Study</span>
+          <span>Meetings</span>
+          <span>Diary</span>
+          <span>Paper</span>
         </div>
         <form @submit.prevent="createProject">
-          <input v-model="projectForm.title" type="text" placeholder="AAAI-2027" />
-          <input v-model="projectForm.researchDirection" type="text" placeholder="Drug Recommendation / LLM" />
+          <input v-model="projectForm.title" type="text" placeholder="Weekly work log / Group meeting / AAAI-2027" />
+          <input v-model="projectForm.researchDirection" type="text" placeholder="Theme or area: product, study, lab, life" />
           <select v-model="projectForm.stage">
             <option v-for="stage in projectStageOptions" :key="stage.value" :value="stage.value">
               {{ stage.label }}
             </option>
           </select>
-          <input v-model="projectForm.targetVenue" type="text" placeholder="AAAI-2027 / CIKM-2027" />
-          <textarea v-model="projectForm.description" rows="3" placeholder="Submission notes and scope" />
-          <input v-model="projectForm.tags" type="text" placeholder="tags: RL, survey" />
-          <button class="primary-button" type="submit" :disabled="workbench.loading">Create Project</button>
+          <input v-model="projectForm.targetVenue" type="text" placeholder="Goal, venue, cadence, or owner" />
+          <textarea v-model="projectForm.description" rows="3" placeholder="What should this space help you remember, plan, or move forward?" />
+          <input v-model="projectForm.tags" type="text" placeholder="tags: work, study, diary, paper" />
+          <button class="primary-button" type="submit" :disabled="workbench.loading">Create Space</button>
         </form>
       </section>
 

@@ -421,6 +421,30 @@ label.file-action:hover {
 }
 
 /* ===== New Project Form ===== */
+.new-project-copy {
+  margin: -4px 0 var(--space-md);
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
+.use-case-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 var(--space-md);
+}
+
+.use-case-row span {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  padding: 3px 8px;
+  color: var(--color-text-secondary);
+  background: var(--color-surface-hover);
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
 .new-project textarea {
   min-height: 84px;
 }

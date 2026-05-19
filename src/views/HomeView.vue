@@ -122,9 +122,9 @@ const handleCoverFile = async (event: Event) => {
   <section class="project-dashboard">
     <header class="dashboard-header">
       <div>
-        <p class="eyebrow">My Submission Projects</p>
-        <h1>我的投稿项目</h1>
-        <p>Open a project to manage assets, ideas, versions, and its research timeline.</p>
+        <p class="eyebrow">My Spaces</p>
+        <h1>Work, study, meetings, papers, and journals</h1>
+        <p>Open a space to manage assets, ideas, versions, plans, and its timeline.</p>
       </div>
       <button type="button" class="primary-button" @click="workbench.chooseWorkspace">
         Select Workspace
@@ -165,7 +165,7 @@ const handleCoverFile = async (event: Event) => {
           </div>
 
           <p class="project-direction">
-            {{ project.researchDirection || 'Research direction not set' }}
+            {{ project.researchDirection || 'Theme or area not set' }}
           </p>
 
           <p class="project-description">
@@ -203,18 +203,18 @@ const handleCoverFile = async (event: Event) => {
           </div>
 
           <form v-if="editingProjectId === project.id" class="project-edit-form" @submit.prevent="saveEdit">
-            <input v-model="editForm.title" type="text" placeholder="Project name" />
-            <input v-model="editForm.researchDirection" type="text" placeholder="Research direction" />
+            <input v-model="editForm.title" type="text" placeholder="Space name" />
+            <input v-model="editForm.researchDirection" type="text" placeholder="Theme or area" />
             <div class="form-row">
-              <input v-model="editForm.targetVenue" type="text" placeholder="Target venue" />
+              <input v-model="editForm.targetVenue" type="text" placeholder="Goal, venue, cadence, or owner" />
               <select v-model="editForm.stage">
                 <option v-for="stage in projectStageOptions" :key="stage.value" :value="stage.value">
                   {{ stage.label }}
                 </option>
               </select>
             </div>
-            <input v-model="editForm.tags" type="text" placeholder="tags: recommendation, LLM" />
-            <textarea v-model="editForm.description" rows="3" placeholder="Project notes" />
+            <input v-model="editForm.tags" type="text" placeholder="tags: work, study, diary, paper" />
+            <textarea v-model="editForm.description" rows="3" placeholder="Space notes" />
             <div class="button-row">
               <button type="submit" class="primary-button">Save</button>
               <button type="button" @click="cancelEdit">Cancel</button>
@@ -226,9 +226,9 @@ const handleCoverFile = async (event: Event) => {
 
     <section v-else class="empty-state compact-empty">
       <div>
-        <p class="eyebrow">No Project</p>
-        <h1>先在左侧创建一个投稿项目。</h1>
-        <p>Examples: AAAI-2027 Drug Recommendation, CIKM-2027 Causal Recommendation.</p>
+        <p class="eyebrow">No Space</p>
+        <h1>Create a space from the sidebar.</h1>
+        <p>Examples: weekly work log, exam study plan, group meeting notes, research submission, travel diary.</p>
       </div>
     </section>
   </section>

@@ -42,14 +42,14 @@ const splitTags = (value: string) =>
     .filter(Boolean)
 
 export const projectStageOptions: Array<{ value: ProjectStage; label: string }> = [
-  { value: 'idea', label: 'Idea 整理' },
-  { value: 'survey', label: '文献调研' },
-  { value: 'method_design', label: '方法设计' },
-  { value: 'experiment', label: '实验中' },
-  { value: 'writing', label: '写作中' },
-  { value: 'revision', label: '修改中' },
-  { value: 'submitted', label: '已投稿' },
-  { value: 'archived', label: '已归档' },
+  { value: 'idea', label: 'Capture' },
+  { value: 'survey', label: 'Explore' },
+  { value: 'method_design', label: 'Plan' },
+  { value: 'experiment', label: 'Doing' },
+  { value: 'writing', label: 'Writing / Log' },
+  { value: 'revision', label: 'Review' },
+  { value: 'submitted', label: 'Delivered' },
+  { value: 'archived', label: 'Archived' },
 ]
 
 export const getProjectStageLabel = (stage: ProjectStage) =>
