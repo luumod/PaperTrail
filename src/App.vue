@@ -60,6 +60,15 @@ const selectProject = async (projectId: string) => {
 
 <template>
   <div class="app-shell">
+    <div class="operation-toast-region" aria-live="polite" aria-atomic="true">
+      <p v-if="workbench.error" class="operation-toast error-banner" role="alert">
+        {{ workbench.error }}
+      </p>
+      <p v-else-if="workbench.loading" class="operation-toast status-banner" role="status">
+        Working...
+      </p>
+    </div>
+
     <aside class="sidebar">
       <RouterLink class="brand" to="/">
         <span class="brand-mark">PT</span>
@@ -89,9 +98,6 @@ const selectProject = async (projectId: string) => {
           {{ workbench.usingDesktop ? 'Electron mode: SQLite + file copy' : 'Browser demo mode: localStorage' }}
         </p>
       </section>
-
-      <p v-if="workbench.error" class="error-banner">{{ workbench.error }}</p>
-      <p v-else-if="workbench.loading" class="status-banner">Working...</p>
 
       <section class="new-project">
         <div class="section-title">
