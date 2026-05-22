@@ -800,6 +800,47 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
     }, 'Failed to delete asset')
 
+  const renameAsset = async (assetId: string, title: string) =>
+    runAction(async () => {
+      const asset = assets.value.find((item) => item.id === assetId)
+      const nextTitle = title.trim()
+      if (!asset || !nextTitle || nextTitle === asset.title) return
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.renameAsset(assetId, nextTitle)
+        setBundle(bundle)
+        selectedAssetId.value = assetId
+        return
+      }
+
+      const timestamp = nowIso()
+      const previousTitle = asset.title
+      assets.value = assets.value.map((item) =>
+        item.id === assetId
+          ? {
+              ...item,
+              title: nextTitle,
+              updatedAt: timestamp,
+            }
+          : item,
+      )
+      events.value = [
+        {
+          id: makeId('event'),
+          projectId: asset.projectId,
+          eventType: 'asset_updated',
+          title: `Rename asset: ${nextTitle}`,
+          description: `Renamed from "${previousTitle}". File type and path were unchanged.`,
+          assetId,
+          ideaId: null,
+          versionId: null,
+          eventDate: timestamp,
+        },
+        ...events.value,
+      ]
+      persistLocal()
+    }, 'Failed to rename asset')
+
   const openAsset = async (assetId: string) =>
     runAction(async () => {
       if (usingDesktop.value) {
@@ -1271,6 +1312,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     toggleAssetTypeFilter,
     importAssets,
     createAssetFile,
+    renameAsset,
     deleteAsset,
     openAsset,
     revealAsset,

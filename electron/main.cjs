@@ -1132,6 +1132,34 @@ handle('delete_asset', async ({ assetId }) => {
   return bundle
 })
 
+handle('rename_asset', async ({ assetId, title }) => {
+  const nextTitle = String(title || '').trim()
+  if (!nextTitle) {
+    throw new Error('Asset title is required.')
+  }
+
+  const { db, file } = await openDb()
+  const asset = getAsset(db, assetId)
+  if (!asset) {
+    await saveDb(db, file)
+    throw new Error(`Asset not found: ${assetId}`)
+  }
+
+  const timestamp = now()
+  run(db, `UPDATE assets SET title = ?, updated_at = ? WHERE id = ?`, [nextTitle, timestamp, assetId])
+  insertEvent(
+    db,
+    asset.projectId,
+    'asset_updated',
+    `Rename asset: ${nextTitle}`,
+    `Renamed from "${asset.title}". File type and path were unchanged.`,
+    assetId,
+  )
+  const bundle = getProjectBundle(db, asset.projectId)
+  await saveDb(db, file)
+  return bundle
+})
+
 handle('open_asset', async ({ assetId }) => {
   const { db, file } = await openDb()
   const asset = getAsset(db, assetId)

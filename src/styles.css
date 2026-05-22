@@ -1642,6 +1642,24 @@ label.file-action:hover {
   font-weight: 500;
 }
 
+.asset-title-form {
+  grid-template-columns: minmax(0, 1fr) 140px auto;
+  align-items: end;
+}
+
+.asset-title-form label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.asset-title-form button {
+  height: 42px;
+}
+
 .modal-version-form {
   margin: 0;
 }
@@ -1874,6 +1892,7 @@ label.file-action:hover {
   .header-actions,
   .plan-form,
   .version-form,
+  .asset-title-form,
   .form-row,
   .modal-header,
   .idea-card-header,

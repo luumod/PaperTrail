@@ -27,6 +27,10 @@ const versionForm = reactive({
   note: '',
 })
 
+const assetTitleForm = reactive({
+  title: '',
+})
+
 const createFileForm = reactive<NewAssetFileInput>({
   fileType: 'md',
   fileName: '',
@@ -90,7 +94,18 @@ watch(
   { immediate: true, deep: true },
 )
 
+watch(
+  () => workbench.selectedAsset?.title,
+  (title) => {
+    assetTitleForm.title = title ?? ''
+  },
+  { immediate: true },
+)
+
 const selectedAssetVersions = computed(() => workbench.assetVersions)
+const isAssetTitleUnchanged = computed(
+  () => assetTitleForm.title.trim() === (workbench.selectedAsset?.title ?? ''),
+)
 const today = computed(() => new Date().toISOString().slice(0, 10))
 const createFileTypeOptions: Array<{ value: NewAssetFileInput['fileType']; label: string }> = [
   { value: 'md', label: 'Markdown (.md)' },
@@ -550,6 +565,7 @@ const closeAssetDetail = () => {
   stopAssetRefresh()
   isAssetModalOpen.value = false
   workbench.selectedAssetId = ''
+  assetTitleForm.title = ''
 }
 
 onMounted(() => {
@@ -716,6 +732,21 @@ const deleteAsset = async (assetId: string, title: string) => {
     closeAssetDetail()
   }
   await workbench.deleteAsset(assetId)
+}
+
+const saveAssetTitle = async () => {
+  if (!workbench.selectedAsset) return
+
+  const nextTitle = assetTitleForm.title.trim()
+  if (!nextTitle) {
+    workbench.error = 'Asset title is required.'
+    return
+  }
+
+  if (nextTitle === workbench.selectedAsset.title) return
+
+  await workbench.renameAsset(workbench.selectedAsset.id, nextTitle)
+  assetTitleForm.title = nextTitle
 }
 
 const startEditTimeline = (event: TimelineEvent) => {
@@ -1197,6 +1228,24 @@ const exportTimeline = async (format: TimelineExportFormat) => {
             <span>Imported: {{ new Date(workbench.selectedAsset.createdAt).toLocaleString() }}</span>
             <span>Last modified: {{ new Date(workbench.selectedAsset.updatedAt).toLocaleString() }}</span>
           </div>
+
+          <form class="asset-title-form" @submit.prevent="saveAssetTitle">
+            <label>
+              Asset title
+              <input v-model="assetTitleForm.title" type="text" placeholder="Asset title" />
+            </label>
+            <label>
+              File type
+              <input :value="workbench.selectedAsset.fileType" type="text" disabled />
+            </label>
+            <button
+              type="submit"
+              class="primary-button"
+              :disabled="workbench.loading || !assetTitleForm.title.trim() || isAssetTitleUnchanged"
+            >
+              Save Title
+            </button>
+          </form>
 
           <div class="button-row">
             <button type="button" @click="workbench.openAsset(workbench.selectedAsset.id)">Open</button>

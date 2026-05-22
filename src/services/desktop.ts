@@ -49,6 +49,8 @@ export const desktopApi = {
   importAssets: (projectId: string) => invoke<Asset[]>('import_assets', { projectId }),
   createAssetFile: (projectId: string, input: NewAssetFileInput) =>
     invoke<ProjectBundle>('create_asset_file', { projectId, input }),
+  renameAsset: (assetId: string, title: string) =>
+    invoke<ProjectBundle>('rename_asset', { assetId, title }),
   deleteAsset: (assetId: string) => invoke<ProjectBundle>('delete_asset', { assetId }),
   openAsset: (assetId: string) => invoke<void>('open_asset', { assetId }),
   revealAsset: (assetId: string) => invoke<void>('reveal_asset', { assetId }),
