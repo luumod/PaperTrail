@@ -102,6 +102,7 @@ export interface ProjectPlanRange {
   isDeadline: boolean
   createdAt: string
   updatedAt: string
+  archivedAt: string | null
 }
 
 export interface ProjectPlanRangeInput {

@@ -97,6 +97,7 @@ const normalizePlanRange = (
   isDeadline: range.isDeadline ?? false,
   createdAt: range.createdAt ?? nowIso(),
   updatedAt: range.updatedAt ?? range.createdAt ?? nowIso(),
+  archivedAt: range.archivedAt ?? null,
 })
 
 const normalizeAsset = (asset: Asset): Asset => ({
@@ -309,7 +310,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     assets.value = (bundle.assets ?? []).map((asset) => normalizeAsset(asset))
     versions.value = bundle.versions ?? []
     ideas.value = (bundle.ideas ?? []).map((idea) => normalizeIdea(idea))
-    planRanges.value = (bundle.planRanges ?? []).map((range) => normalizePlanRange(range))
+    planRanges.value = (bundle.planRanges ?? [])
+      .map((range) => normalizePlanRange(range))
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate))
     events.value = bundle.events ?? []
     summaries.value = bundle.summaries ?? []
     selectedAssetId.value = ''
@@ -318,6 +321,26 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const localProjectBundle = (projectId: string): ProjectBundle => {
     const local = loadLocalState()
     const projectAssets = local.assets.filter((asset) => asset.projectId === projectId)
+    const timestamp = nowIso()
+    const today = timestamp.slice(0, 10)
+    let archivedExpiredRanges = false
+    const projectPlanRanges = local.planRanges
+      .filter((range) => range.projectId === projectId)
+      .map((range) => {
+        if (!range.archivedAt && range.endDate < today) {
+          archivedExpiredRanges = true
+          return { ...range, archivedAt: timestamp, updatedAt: timestamp }
+        }
+        return range
+      })
+
+    if (archivedExpiredRanges) {
+      local.planRanges = [
+        ...local.planRanges.filter((range) => range.projectId !== projectId),
+        ...projectPlanRanges,
+      ]
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(local))
+    }
 
     return {
       assets: projectAssets,
@@ -325,7 +348,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         projectAssets.some((asset) => asset.id === version.assetId),
       ),
       ideas: local.ideas.filter((idea) => idea.projectId === projectId),
-      planRanges: local.planRanges.filter((range) => range.projectId === projectId),
+      planRanges: projectPlanRanges,
       events: local.events.filter((event) => event.projectId === projectId),
       summaries: local.summaries.filter((summary) => summary.projectId === projectId),
     }
@@ -1174,6 +1197,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       const timestamp = nowIso()
+      const today = timestamp.slice(0, 10)
       const range: ProjectPlanRange = {
         id: makeId('plan'),
         projectId: activeProjectId.value,
@@ -1185,6 +1209,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         isDeadline: input.isDeadline,
         createdAt: timestamp,
         updatedAt: timestamp,
+        archivedAt: input.endDate < today ? timestamp : null,
       }
 
       planRanges.value = [...planRanges.value, range].sort((a, b) =>
@@ -1221,6 +1246,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         color: input.color,
         isDeadline: input.isDeadline,
         updatedAt: timestamp,
+        archivedAt: input.endDate < timestamp.slice(0, 10) ? timestamp : null,
       }
       planRanges.value = planRanges.value
         .map((range) => (range.id === rangeId ? updated : range))

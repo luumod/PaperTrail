@@ -997,6 +997,22 @@ label.file-action:hover {
   text-transform: none;
 }
 
+.plan-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.plan-heading-actions button {
+  padding: 6px 12px;
+  color: var(--color-brand);
+  background: var(--color-info-bg);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .plan-form {
   grid-template-columns: minmax(180px, 1.3fr) minmax(132px, 0.7fr) minmax(132px, 0.7fr) minmax(110px, 0.55fr);
   gap: var(--space-sm);
@@ -1793,6 +1809,52 @@ label.file-action:hover {
 
 .create-file-modal {
   width: min(560px, 100%);
+}
+
+.plan-memo-modal {
+  width: min(760px, 100%);
+}
+
+.plan-memo-list {
+  display: grid;
+  gap: var(--space-md);
+  max-height: 480px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.plan-memo-card {
+  display: grid;
+  gap: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--plan-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+}
+
+.plan-memo-card header {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: start;
+  justify-content: space-between;
+}
+
+.plan-memo-card header strong {
+  min-width: 0;
+}
+
+.plan-memo-card header span {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.plan-memo-card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
 }
 
 .create-file-form label {

@@ -488,7 +488,8 @@ const initDb = (db) => {
       color TEXT NOT NULL,
       is_deadline INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      archived_at TEXT
     );
 
     CREATE TABLE IF NOT EXISTS timeline_events (
@@ -516,6 +517,7 @@ const initDb = (db) => {
   ensureColumn(db, 'assets', 'asset_kind', "TEXT NOT NULL DEFAULT 'file'")
   ensureColumn(db, 'assets', 'category', "TEXT NOT NULL DEFAULT ''")
   ensureColumn(db, 'ideas', 'completed', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'project_plan_ranges', 'archived_at', 'TEXT')
 }
 
 const detectFileType = (name) => {
@@ -596,6 +598,7 @@ const rowToPlanRange = (row) => ({
   isDeadline: Boolean(row[7]),
   createdAt: row[8],
   updatedAt: row[9],
+  archivedAt: row[10],
 })
 
 const rowToEvent = (row) => ({
@@ -656,7 +659,7 @@ const getPlanRange = (db, rangeId) =>
   rows(
     db,
     `SELECT id, project_id, title, description, start_date, end_date, color, is_deadline,
-            created_at, updated_at
+            created_at, updated_at, archived_at
      FROM project_plan_ranges WHERE id = ?`,
     [rangeId],
   ).map(rowToPlanRange)[0]
@@ -676,6 +679,18 @@ const getTimelineEvents = (db, projectId) =>
      FROM timeline_events WHERE project_id = ? ORDER BY event_date ASC`,
     [projectId],
   ).map(rowToEvent)
+
+const archiveExpiredPlanRanges = (db, projectId) => {
+  const timestamp = now()
+  const today = timestamp.slice(0, 10)
+  run(
+    db,
+    `UPDATE project_plan_ranges
+     SET archived_at = ?, updated_at = ?
+     WHERE project_id = ? AND archived_at IS NULL AND end_date < ?`,
+    [timestamp, timestamp, projectId, today],
+  )
+}
 
 const refreshAssetMetadata = async (db, assetId, options = {}) => {
   const asset = getAsset(db, assetId)
@@ -733,6 +748,7 @@ const listProjects = (db) =>
   rows(db, `${selectProjectSql} WHERE deleted_at IS NULL ORDER BY updated_at DESC`).map(rowToProject)
 
 const getProjectBundle = (db, projectId) => {
+  archiveExpiredPlanRanges(db, projectId)
   const assets = rows(
     db,
     `SELECT id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
@@ -763,7 +779,7 @@ const getProjectBundle = (db, projectId) => {
     planRanges: rows(
       db,
       `SELECT id, project_id, title, description, start_date, end_date, color, is_deadline,
-              created_at, updated_at
+              created_at, updated_at, archived_at
        FROM project_plan_ranges WHERE project_id = ? ORDER BY start_date ASC, end_date ASC`,
       [projectId],
     ).map(rowToPlanRange),
@@ -1471,8 +1487,8 @@ handle('create_plan_range', async ({ projectId, input }) => {
   run(
     db,
     `INSERT INTO project_plan_ranges
-     (id, project_id, title, description, start_date, end_date, color, is_deadline, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, title, description, start_date, end_date, color, is_deadline, created_at, updated_at, archived_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       rangeId,
       projectId,
@@ -1484,6 +1500,7 @@ handle('create_plan_range', async ({ projectId, input }) => {
       input.isDeadline ? 1 : 0,
       timestamp,
       timestamp,
+      endDate < timestamp.slice(0, 10) ? timestamp : null,
     ],
   )
   run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, projectId])
@@ -1517,7 +1534,7 @@ handle('update_plan_range', async ({ rangeId, input }) => {
   run(
     db,
     `UPDATE project_plan_ranges
-     SET title = ?, description = ?, start_date = ?, end_date = ?, color = ?, is_deadline = ?, updated_at = ?
+     SET title = ?, description = ?, start_date = ?, end_date = ?, color = ?, is_deadline = ?, updated_at = ?, archived_at = ?
      WHERE id = ?`,
     [
       title,
@@ -1527,6 +1544,7 @@ handle('update_plan_range', async ({ rangeId, input }) => {
       String(input.color || 'blue'),
       input.isDeadline ? 1 : 0,
       timestamp,
+      endDate < timestamp.slice(0, 10) ? timestamp : null,
       rangeId,
     ],
   )

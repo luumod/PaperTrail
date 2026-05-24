@@ -40,6 +40,7 @@ const createFileForm = reactive<NewAssetFileInput>({
 const summariesDraft = reactive<Record<string, string>>({})
 const isAssetModalOpen = ref(false)
 const isCreateFileModalOpen = ref(false)
+const isPlanMemoOpen = ref(false)
 const assetRefreshTimer = ref<number | null>(null)
 const versionError = ref('')
 const editingTimelineId = ref('')
@@ -165,13 +166,19 @@ const dayDiff = (from: string, to: string) => Math.round((parseDay(to) - parseDa
 const rangeDuration = (range: ProjectPlanRange) => Math.max(1, dayDiff(range.startDate, range.endDate) + 1)
 const resolvePlanColor = (value: string) =>
   /^#[0-9a-f]{6}$/i.test(value) ? value : legacyPlanColors[value] ?? defaultPlanColor
-const nextAutoPlanColor = () => planPalette[workbench.planRanges.length % planPalette.length] ?? defaultPlanColor
+const activePlanRanges = computed(() => workbench.planRanges.filter((range) => !range.archivedAt))
+const archivedPlanRanges = computed(() =>
+  workbench.planRanges
+    .filter((range) => range.archivedAt)
+    .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') || b.endDate.localeCompare(a.endDate)),
+)
+const nextAutoPlanColor = () => planPalette[activePlanRanges.value.length % planPalette.length] ?? defaultPlanColor
 const applyAutoPlanColor = () => {
   planForm.color = nextAutoPlanColor()
 }
 
 const sortedPlanRanges = computed(() =>
-  [...workbench.planRanges].sort(
+  [...activePlanRanges.value].sort(
     (a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate),
   ),
 )
@@ -297,6 +304,7 @@ const focusPlanWindow = (startDate: string, endDate: string) => {
     isDeadline: false,
     createdAt: '',
     updatedAt: '',
+    archivedAt: null,
   })
 
   if (duration + 14 > planVisibleDays.value) {
@@ -852,7 +860,12 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           <h2>Project Plan Timeline</h2>
           <span>{{ deadlineStatus }}</span>
         </div>
-        <span>{{ planViewportLabel }} | {{ sortedPlanRanges.length }} ranges</span>
+        <div class="plan-heading-actions">
+          <button type="button" @click="isPlanMemoOpen = true">
+            Memo: {{ archivedPlanRanges.length }}
+          </button>
+          <span>{{ planViewportLabel }} | {{ sortedPlanRanges.length }} active ranges</span>
+        </div>
       </div>
 
       <form class="plan-form" @submit.prevent="savePlanRange">
@@ -925,8 +938,8 @@ const exportTimeline = async (format: TimelineExportFormat) => {
             <span>Today</span>
           </div>
           <article v-if="!planTimelineItems.length" class="plan-empty-message">
-            <strong>{{ sortedPlanRanges.length ? 'No ranges in this view' : 'No plan ranges yet' }}</strong>
-            <span>{{ sortedPlanRanges.length ? 'Current window has no scheduled ranges.' : 'Add a range above and it will appear on this calendar.' }}</span>
+            <strong>{{ sortedPlanRanges.length ? 'No ranges in this view' : 'No active plan ranges' }}</strong>
+            <span>{{ sortedPlanRanges.length ? 'Current window has no scheduled ranges.' : 'Add a range above; expired ranges move into Memo automatically.' }}</span>
           </article>
           <template v-if="!planTimelineItems.length">
             <article
@@ -1243,6 +1256,47 @@ const exportTimeline = async (format: TimelineExportFormat) => {
               <button type="button" @click="closeCreateFileModal">Cancel</button>
             </div>
           </form>
+        </section>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="isPlanMemoOpen"
+        class="modal-backdrop"
+        role="presentation"
+        @click.self="isPlanMemoOpen = false"
+      >
+        <section class="asset-modal plan-memo-modal" role="dialog" aria-modal="true" aria-labelledby="plan-memo-title">
+          <header class="modal-header">
+            <div>
+              <p class="eyebrow">Plan Memo</p>
+              <h2 id="plan-memo-title">Expired plan ranges</h2>
+              <p>{{ archivedPlanRanges.length }} archived ranges are hidden from the active calendar.</p>
+            </div>
+            <button type="button" class="icon-button close-button" title="Close" @click="isPlanMemoOpen = false">x</button>
+          </header>
+
+          <div v-if="archivedPlanRanges.length" class="plan-memo-list">
+            <article
+              v-for="range in archivedPlanRanges"
+              :key="range.id"
+              class="plan-memo-card"
+              :style="{ '--plan-bg': resolvePlanColor(range.color) }"
+            >
+              <header>
+                <strong>{{ range.title }}</strong>
+                <span>{{ range.startDate }} - {{ range.endDate }}</span>
+              </header>
+              <p>{{ range.description || 'No description.' }}</p>
+              <div class="asset-modal-meta">
+                <span>{{ rangeDuration(range) }} days</span>
+                <span>{{ range.isDeadline ? 'Deadline' : 'Range' }}</span>
+                <span>Archived: {{ range.archivedAt ? new Date(range.archivedAt).toLocaleString() : 'Unknown' }}</span>
+              </div>
+            </article>
+          </div>
+          <p v-else class="empty-copy">No expired plan ranges yet.</p>
         </section>
       </div>
     </Teleport>
