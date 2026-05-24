@@ -1,6 +1,8 @@
 export type AssetType = 'pdf' | 'word' | 'slides' | 'markdown' | 'image' | 'data' | 'other'
 
-export type AssetSummaryKey = 'md' | 'ppt' | 'images' | 'papers' | 'word' | 'data' | 'other'
+export type AssetKind = 'file' | 'folder'
+
+export type AssetSummaryKey = 'folders' | 'md' | 'ppt' | 'images' | 'papers' | 'word' | 'data' | 'other'
 
 export type NewAssetFileType = 'md' | 'docx' | 'pptx' | 'xlsx'
 
@@ -55,9 +57,11 @@ export interface Asset {
   originalName: string
   fileName: string
   filePath: string
+  assetKind: AssetKind
   fileType: AssetType
   mimeType: string
   sizeBytes: number
+  category: string
   tags: string[]
   currentVersionId: string
   createdAt: string

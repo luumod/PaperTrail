@@ -29,6 +29,7 @@ const versionForm = reactive({
 
 const assetTitleForm = reactive({
   title: '',
+  category: '',
 })
 
 const createFileForm = reactive<NewAssetFileInput>({
@@ -95,9 +96,10 @@ watch(
 )
 
 watch(
-  () => workbench.selectedAsset?.title,
-  (title) => {
-    assetTitleForm.title = title ?? ''
+  () => workbench.selectedAsset,
+  (asset) => {
+    assetTitleForm.title = asset?.title ?? ''
+    assetTitleForm.category = asset?.category ?? ''
   },
   { immediate: true },
 )
@@ -105,6 +107,9 @@ watch(
 const selectedAssetVersions = computed(() => workbench.assetVersions)
 const isAssetTitleUnchanged = computed(
   () => assetTitleForm.title.trim() === (workbench.selectedAsset?.title ?? ''),
+)
+const isAssetCategoryUnchanged = computed(
+  () => assetTitleForm.category.trim() === (workbench.selectedAsset?.category ?? ''),
 )
 const today = computed(() => new Date().toISOString().slice(0, 10))
 const createFileTypeOptions: Array<{ value: NewAssetFileInput['fileType']; label: string }> = [
@@ -380,6 +385,7 @@ const deadlineStatus = computed(() => {
 })
 const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
   const stats = {
+    folders: 0,
     md: 0,
     ppt: 0,
     images: 0,
@@ -390,7 +396,8 @@ const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
   }
 
   for (const asset of workbench.assets) {
-    if (asset.fileType === 'markdown') stats.md += 1
+    if (asset.assetKind === 'folder') stats.folders += 1
+    else if (asset.fileType === 'markdown') stats.md += 1
     else if (asset.fileType === 'slides') stats.ppt += 1
     else if (asset.fileType === 'image') stats.images += 1
     else if (asset.fileType === 'pdf') stats.papers += 1
@@ -403,6 +410,7 @@ const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
 })
 
 const assetSummaryItems = computed<Array<{ key: AssetSummaryKey; label: string; count: number }>>(() => [
+  { key: 'folders', label: 'folders', count: assetStats.value.folders },
   { key: 'md', label: 'md', count: assetStats.value.md },
   { key: 'ppt', label: 'ppt', count: assetStats.value.ppt },
   { key: 'images', label: 'images', count: assetStats.value.images },
@@ -411,6 +419,20 @@ const assetSummaryItems = computed<Array<{ key: AssetSummaryKey; label: string; 
   { key: 'data', label: 'data', count: assetStats.value.data },
   { key: 'other', label: 'other', count: assetStats.value.other },
 ])
+
+const assetGroups = computed(() => {
+  const grouped = new Map<string, typeof workbench.filteredAssets>()
+
+  for (const asset of workbench.filteredAssets) {
+    const category = asset.category.trim() || 'Uncategorized'
+    grouped.set(category, [...(grouped.get(category) ?? []), asset])
+  }
+
+  return [...grouped.entries()].map(([category, assets]) => ({
+    category,
+    assets,
+  }))
+})
 
 const timelineEventsSorted = computed(() =>
   [...workbench.events].sort((a, b) => a.eventDate.localeCompare(b.eventDate)),
@@ -511,6 +533,10 @@ const chooseImport = async () => {
   fileInput.value?.click()
 }
 
+const chooseFolderImport = async () => {
+  await workbench.importAssetFolder()
+}
+
 const openCreateFileModal = () => {
   createFileForm.fileType = 'md'
   createFileForm.fileName = ''
@@ -566,6 +592,7 @@ const closeAssetDetail = () => {
   isAssetModalOpen.value = false
   workbench.selectedAssetId = ''
   assetTitleForm.title = ''
+  assetTitleForm.category = ''
 }
 
 onMounted(() => {
@@ -738,15 +765,20 @@ const saveAssetTitle = async () => {
   if (!workbench.selectedAsset) return
 
   const nextTitle = assetTitleForm.title.trim()
+  const nextCategory = assetTitleForm.category.trim()
   if (!nextTitle) {
     workbench.error = 'Asset title is required.'
     return
   }
 
-  if (nextTitle === workbench.selectedAsset.title) return
-
-  await workbench.renameAsset(workbench.selectedAsset.id, nextTitle)
+  if (nextTitle !== workbench.selectedAsset.title) {
+    await workbench.renameAsset(workbench.selectedAsset.id, nextTitle)
+  }
+  if (nextCategory !== (workbench.selectedAsset?.category ?? '')) {
+    await workbench.updateAssetCategory(workbench.selectedAsset.id, nextCategory)
+  }
   assetTitleForm.title = nextTitle
+  assetTitleForm.category = nextCategory
 }
 
 const startEditTimeline = (event: TimelineEvent) => {
@@ -802,7 +834,10 @@ const exportTimeline = async (format: TimelineExportFormat) => {
       <div class="header-actions">
         <input v-model="workbench.searchQuery" type="search" placeholder="Search title, tag, type, or idea" />
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseImport">
-          Import Assets
+          Import Files
+        </button>
+        <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseFolderImport">
+          Import Folder
         </button>
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="openCreateFileModal">
           New File
@@ -968,29 +1003,36 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         </div>
 
         <div v-if="workbench.filteredAssets.length" class="asset-list">
-          <article
-            v-for="asset in workbench.filteredAssets"
-            :key="asset.id"
-            class="asset-row"
-            :class="{ active: asset.id === workbench.selectedAssetId }"
-          >
-            <button type="button" class="asset-main" @click="openAssetDetail(asset.id)">
-              <span class="file-type">{{ asset.fileType }}</span>
-              <strong>{{ asset.title }}</strong>
-              <small>{{ asset.originalName }}</small>
-              <span class="tag-row">
-                <em v-for="tag in asset.tags" :key="tag">{{ tag }}</em>
-              </span>
-            </button>
-            <button
-              type="button"
-              class="danger-button asset-delete-button"
-              title="Delete asset"
-              @click="deleteAsset(asset.id, asset.title)"
+          <section v-for="group in assetGroups" :key="group.category" class="asset-group">
+            <header class="asset-group-heading">
+              <strong>{{ group.category }}</strong>
+              <span>{{ group.assets.length }} {{ group.assets.length === 1 ? 'asset' : 'assets' }}</span>
+            </header>
+            <article
+              v-for="asset in group.assets"
+              :key="asset.id"
+              class="asset-row"
+              :class="{ active: asset.id === workbench.selectedAssetId }"
             >
-              Delete
-            </button>
-          </article>
+              <button type="button" class="asset-main" @click="openAssetDetail(asset.id)">
+                <span class="file-type">{{ asset.assetKind === 'folder' ? 'folder' : asset.fileType }}</span>
+                <strong>{{ asset.title }}</strong>
+                <small>{{ asset.originalName }}</small>
+                <span class="tag-row">
+                  <em v-if="asset.category">{{ asset.category }}</em>
+                  <em v-for="tag in asset.tags" :key="tag">{{ tag }}</em>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="danger-button asset-delete-button"
+                title="Delete asset"
+                @click="deleteAsset(asset.id, asset.title)"
+              >
+                Delete
+              </button>
+            </article>
+          </section>
         </div>
 
         <p v-else class="empty-copy">
@@ -1223,7 +1265,8 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           </header>
 
           <div class="asset-modal-meta">
-            <span>{{ workbench.selectedAsset.fileType }}</span>
+            <span>{{ workbench.selectedAsset.assetKind === 'folder' ? 'Folder' : workbench.selectedAsset.fileType }}</span>
+            <span>{{ workbench.selectedAsset.category || 'Uncategorized' }}</span>
             <span>{{ Math.max(1, Math.round(workbench.selectedAsset.sizeBytes / 1024)) }} KB</span>
             <span>Imported: {{ new Date(workbench.selectedAsset.createdAt).toLocaleString() }}</span>
             <span>Last modified: {{ new Date(workbench.selectedAsset.updatedAt).toLocaleString() }}</span>
@@ -1235,15 +1278,15 @@ const exportTimeline = async (format: TimelineExportFormat) => {
               <input v-model="assetTitleForm.title" type="text" placeholder="Asset title" />
             </label>
             <label>
-              File type
-              <input :value="workbench.selectedAsset.fileType" type="text" disabled />
+              Category
+              <input v-model="assetTitleForm.category" type="text" placeholder="Review task, rebuttal, experiment..." />
             </label>
             <button
               type="submit"
               class="primary-button"
-              :disabled="workbench.loading || !assetTitleForm.title.trim() || isAssetTitleUnchanged"
+              :disabled="workbench.loading || !assetTitleForm.title.trim() || (isAssetTitleUnchanged && isAssetCategoryUnchanged)"
             >
-              Save Title
+              Save
             </button>
           </form>
 
@@ -1255,7 +1298,9 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           <form class="version-form modal-version-form" @submit.prevent="saveVersion">
             <input v-model="versionForm.label" type="text" placeholder="version label: v2 / final" />
             <input v-model="versionForm.note" type="text" placeholder="What changed in this version" />
-            <button type="submit" :disabled="workbench.loading">Save New Version</button>
+            <button type="submit" :disabled="workbench.loading">
+              {{ workbench.selectedAsset.assetKind === 'folder' ? 'Save Folder Snapshot' : 'Save New Version' }}
+            </button>
           </form>
           <p v-if="versionError" class="inline-error">{{ versionError }}</p>
 

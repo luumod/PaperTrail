@@ -38,6 +38,24 @@ const uniqueFileName = (originalName) => {
   return `${suffix}_${safeName(parsed.name)}${parsed.ext ? safeName(parsed.ext) : ''}`
 }
 
+const uniqueDirectoryName = (originalName) => `${crypto.randomUUID().slice(0, 8)}_${safeName(originalName || 'folder')}`
+
+const directorySize = async (directory) => {
+  const entries = await fsp.readdir(directory, { withFileTypes: true })
+  let total = 0
+
+  for (const entry of entries) {
+    const entryPath = path.join(directory, entry.name)
+    if (entry.isDirectory()) {
+      total += await directorySize(entryPath)
+    } else if (entry.isFile()) {
+      total += (await fsp.stat(entryPath)).size
+    }
+  }
+
+  return total
+}
+
 const newAssetFileSpecs = {
   md: { extension: '.md', assetType: 'markdown', mimeType: 'text/markdown' },
   docx: {
@@ -426,9 +444,11 @@ const initDb = (db) => {
       original_name TEXT NOT NULL,
       file_name TEXT NOT NULL,
       file_path TEXT NOT NULL,
+      asset_kind TEXT NOT NULL DEFAULT 'file',
       file_type TEXT NOT NULL,
       mime_type TEXT NOT NULL,
       size_bytes INTEGER NOT NULL,
+      category TEXT NOT NULL DEFAULT '',
       tags TEXT NOT NULL,
       current_version_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -493,6 +513,8 @@ const initDb = (db) => {
     );
   `)
   ensureColumn(db, 'projects', 'deleted_at', 'TEXT')
+  ensureColumn(db, 'assets', 'asset_kind', "TEXT NOT NULL DEFAULT 'file'")
+  ensureColumn(db, 'assets', 'category', "TEXT NOT NULL DEFAULT ''")
   ensureColumn(db, 'ideas', 'completed', 'INTEGER NOT NULL DEFAULT 0')
 }
 
@@ -529,13 +551,15 @@ const rowToAsset = (row) => ({
   originalName: row[3],
   fileName: row[4],
   filePath: row[5],
-  fileType: row[6],
-  mimeType: row[7],
-  sizeBytes: row[8],
-  tags: tagsFromJson(row[9]),
-  currentVersionId: row[10],
-  createdAt: row[11],
-  updatedAt: row[12],
+  assetKind: row[6] || 'file',
+  fileType: row[7],
+  mimeType: row[8],
+  sizeBytes: row[9],
+  category: row[10] || '',
+  tags: tagsFromJson(row[11]),
+  currentVersionId: row[12],
+  createdAt: row[13],
+  updatedAt: row[14],
 })
 
 const rowToVersion = (row) => ({
@@ -606,8 +630,8 @@ const getProject = (db, projectId) =>
 const getAsset = (db, assetId) =>
   rows(
     db,
-    `SELECT id, project_id, title, original_name, file_name, file_path, file_type, mime_type,
-            size_bytes, tags, current_version_id, created_at, updated_at
+    `SELECT id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
+            size_bytes, category, tags, current_version_id, created_at, updated_at
      FROM assets WHERE id = ?`,
     [assetId],
   ).map(rowToAsset)[0]
@@ -664,20 +688,21 @@ const refreshAssetMetadata = async (db, assetId, options = {}) => {
     return asset
   }
 
+  const sizeBytes = stat.isDirectory() ? await directorySize(asset.filePath) : stat.size
   const modifiedAt = stat.mtime.toISOString()
   const previousModifiedAt = Date.parse(asset.updatedAt)
   const nextModifiedAt = Date.parse(modifiedAt)
   const changed =
     Number.isNaN(previousModifiedAt) ||
     Math.abs(nextModifiedAt - previousModifiedAt) > 1000 ||
-    Number(asset.sizeBytes) !== Number(stat.size)
+    Number(asset.sizeBytes) !== Number(sizeBytes)
 
   if (!changed) return asset
 
   run(
     db,
     `UPDATE assets SET size_bytes = ?, updated_at = ? WHERE id = ?`,
-    [stat.size, modifiedAt, assetId],
+    [sizeBytes, modifiedAt, assetId],
   )
 
   if (options.recordEvent !== false) {
@@ -710,8 +735,8 @@ const listProjects = (db) =>
 const getProjectBundle = (db, projectId) => {
   const assets = rows(
     db,
-    `SELECT id, project_id, title, original_name, file_name, file_path, file_type, mime_type,
-            size_bytes, tags, current_version_id, created_at, updated_at
+    `SELECT id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
+            size_bytes, category, tags, current_version_id, created_at, updated_at
      FROM assets WHERE project_id = ? ORDER BY updated_at DESC`,
     [projectId],
   ).map(rowToAsset)
@@ -986,9 +1011,9 @@ handle('import_assets', async ({ projectId }) => {
     run(
       db,
       `INSERT INTO assets
-       (id, project_id, title, original_name, file_name, file_path, file_type, mime_type,
-        size_bytes, tags, current_version_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
+        size_bytes, category, tags, current_version_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         assetId,
         projectId,
@@ -996,9 +1021,11 @@ handle('import_assets', async ({ projectId }) => {
         originalName,
         fileName,
         destination,
+        'file',
         fileType,
         '',
         stat.size,
+        '',
         '[]',
         versionId,
         timestamp,
@@ -1016,6 +1043,75 @@ handle('import_assets', async ({ projectId }) => {
     imported.push(getAsset(db, assetId))
   }
 
+  await saveDb(db, file)
+  return imported
+})
+
+handle('import_asset_folder', async ({ projectId }) => {
+  const { db, file } = await openDb()
+  const project = getProject(db, projectId)
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Import folder as one asset',
+    properties: ['openDirectory'],
+  })
+  if (result.canceled) {
+    await saveDb(db, file)
+    return null
+  }
+
+  const source = result.filePaths[0]
+  const originalName = path.basename(source)
+  const assetDir = path.join(project.workspacePath, 'assets')
+  await fsp.mkdir(assetDir, { recursive: true })
+  const fileName = uniqueDirectoryName(originalName)
+  const destination = path.join(assetDir, fileName)
+  await fsp.cp(source, destination, { recursive: true })
+  const stat = await fsp.stat(destination)
+  const sizeBytes = await directorySize(destination)
+  const assetId = id('asset')
+  const versionId = id('version')
+  const timestamp = now()
+  const modifiedAt = stat.mtime.toISOString()
+  const versionDir = path.join(project.workspacePath, 'versions', assetId)
+  await fsp.mkdir(versionDir, { recursive: true })
+  const versionFileName = await uniqueCreatedFileName(versionDir, originalName)
+  const versionDestination = path.join(versionDir, versionFileName)
+  await fsp.cp(destination, versionDestination, { recursive: true })
+
+  run(
+    db,
+    `INSERT INTO assets
+     (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
+      size_bytes, category, tags, current_version_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      assetId,
+      projectId,
+      originalName,
+      originalName,
+      fileName,
+      destination,
+      'folder',
+      'other',
+      'inode/directory',
+      sizeBytes,
+      originalName,
+      '[]',
+      versionId,
+      timestamp,
+      modifiedAt,
+    ],
+  )
+  run(
+    db,
+    `INSERT INTO asset_versions
+     (id, asset_id, label, file_name, file_path, size_bytes, note, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [versionId, assetId, 'v1', versionFileName, versionDestination, sizeBytes, 'Initial folder import', timestamp],
+  )
+  run(db, 'UPDATE projects SET updated_at = ? WHERE id = ?', [timestamp, projectId])
+  insertEvent(db, projectId, 'asset_imported', `Import folder asset: ${originalName}`, source, assetId, null, versionId)
+  const imported = getAsset(db, assetId)
   await saveDb(db, file)
   return imported
 })
@@ -1058,9 +1154,9 @@ handle('create_asset_file', async ({ projectId, input }) => {
   run(
     db,
     `INSERT INTO assets
-     (id, project_id, title, original_name, file_name, file_path, file_type, mime_type,
-      size_bytes, tags, current_version_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
+      size_bytes, category, tags, current_version_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       assetId,
       projectId,
@@ -1068,9 +1164,11 @@ handle('create_asset_file', async ({ projectId, input }) => {
       fileName,
       fileName,
       destination,
+      'file',
       spec.assetType,
       spec.mimeType,
       stat.size,
+      '',
       '[]',
       versionId,
       timestamp,
@@ -1108,7 +1206,7 @@ handle('delete_asset', async ({ assetId }) => {
 
   for (const target of [asset.filePath, ...versions.map((version) => version.filePath)]) {
     try {
-      await fsp.rm(target, { force: true })
+      await fsp.rm(target, { recursive: true, force: true })
     } catch {
       // Ignore missing files; database cleanup still needs to proceed.
     }
@@ -1160,6 +1258,30 @@ handle('rename_asset', async ({ assetId, title }) => {
   return bundle
 })
 
+handle('update_asset_category', async ({ assetId, category }) => {
+  const nextCategory = String(category || '').trim()
+  const { db, file } = await openDb()
+  const asset = getAsset(db, assetId)
+  if (!asset) {
+    await saveDb(db, file)
+    throw new Error(`Asset not found: ${assetId}`)
+  }
+
+  const timestamp = now()
+  run(db, `UPDATE assets SET category = ?, updated_at = ? WHERE id = ?`, [nextCategory, timestamp, assetId])
+  insertEvent(
+    db,
+    asset.projectId,
+    'asset_updated',
+    `Set asset category: ${asset.title}`,
+    nextCategory ? `Category: ${nextCategory}` : 'Category cleared.',
+    assetId,
+  )
+  const bundle = getProjectBundle(db, asset.projectId)
+  await saveDb(db, file)
+  return bundle
+})
+
 handle('open_asset', async ({ assetId }) => {
   const { db, file } = await openDb()
   const asset = getAsset(db, assetId)
@@ -1197,10 +1319,17 @@ handle('save_asset_version', async ({ assetId, label, note }) => {
   const versionDir = path.join(project.workspacePath, 'versions', assetId)
   await fsp.mkdir(versionDir, { recursive: true })
 
-  const fileName = await versionArchiveName(versionDir, asset.originalName || asset.fileName, versionLabel, versionNote)
+  const fileName = asset.assetKind === 'folder'
+    ? await uniqueCreatedFileName(versionDir, `${safeName(asset.originalName || asset.fileName)}-${safeName(versionLabel)}-${safeName(versionNote)}`)
+    : await versionArchiveName(versionDir, asset.originalName || asset.fileName, versionLabel, versionNote)
   const destination = path.join(versionDir, fileName)
-  await fsp.copyFile(asset.filePath, destination)
+  if (asset.assetKind === 'folder') {
+    await fsp.cp(asset.filePath, destination, { recursive: true })
+  } else {
+    await fsp.copyFile(asset.filePath, destination)
+  }
   const stat = await fsp.stat(destination)
+  const sizeBytes = stat.isDirectory() ? await directorySize(destination) : stat.size
   const versionId = id('version')
   const timestamp = now()
 
@@ -1209,14 +1338,14 @@ handle('save_asset_version', async ({ assetId, label, note }) => {
     `INSERT INTO asset_versions
      (id, asset_id, label, file_name, file_path, size_bytes, note, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [versionId, assetId, versionLabel, fileName, destination, stat.size, versionNote, timestamp],
+    [versionId, assetId, versionLabel, fileName, destination, sizeBytes, versionNote, timestamp],
   )
   run(
     db,
     `UPDATE assets
      SET current_version_id = ?, size_bytes = ?, updated_at = ?
      WHERE id = ?`,
-    [versionId, stat.size, asset.updatedAt, assetId],
+    [versionId, sizeBytes, asset.updatedAt, assetId],
   )
   insertEvent(
     db,
