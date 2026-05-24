@@ -358,7 +358,7 @@ const selectPlanRange = (range: ProjectPlanRange) => {
   selectedPlanRangeId.value = selectedPlanRangeId.value === range.id ? '' : range.id
 }
 
-const blurPlanTimelineIfOutside = (event: PointerEvent) => {
+const blurPlanTimelineIfOutside = (event: MouseEvent) => {
   const target = event.target
   if (!(target instanceof Node)) return
   if (planTimelineRef.value?.contains(target)) return
@@ -596,12 +596,12 @@ const closeAssetDetail = () => {
 }
 
 onMounted(() => {
-  window.addEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+  window.addEventListener('click', blurPlanTimelineIfOutside, true)
 })
 
 onBeforeUnmount(() => {
   stopAssetRefresh()
-  window.removeEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+  window.removeEventListener('click', blurPlanTimelineIfOutside, true)
 })
 
 const resetPlanForm = () => {

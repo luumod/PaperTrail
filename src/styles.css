@@ -942,7 +942,6 @@ label.file-action:hover {
 .project-page.is-project-switching {
   opacity: 0.72;
   transform: translateY(2px);
-  pointer-events: none;
 }
 
 .project-header {
