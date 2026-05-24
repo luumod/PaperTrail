@@ -29,6 +29,7 @@ const versionForm = reactive({
 
 const assetTitleForm = reactive({
   title: '',
+  category: '',
 })
 
 const createFileForm = reactive<NewAssetFileInput>({
@@ -39,6 +40,7 @@ const createFileForm = reactive<NewAssetFileInput>({
 const summariesDraft = reactive<Record<string, string>>({})
 const isAssetModalOpen = ref(false)
 const isCreateFileModalOpen = ref(false)
+const isPlanMemoOpen = ref(false)
 const assetRefreshTimer = ref<number | null>(null)
 const versionError = ref('')
 const editingTimelineId = ref('')
@@ -95,9 +97,10 @@ watch(
 )
 
 watch(
-  () => workbench.selectedAsset?.title,
-  (title) => {
-    assetTitleForm.title = title ?? ''
+  () => workbench.selectedAsset,
+  (asset) => {
+    assetTitleForm.title = asset?.title ?? ''
+    assetTitleForm.category = asset?.category ?? ''
   },
   { immediate: true },
 )
@@ -105,6 +108,9 @@ watch(
 const selectedAssetVersions = computed(() => workbench.assetVersions)
 const isAssetTitleUnchanged = computed(
   () => assetTitleForm.title.trim() === (workbench.selectedAsset?.title ?? ''),
+)
+const isAssetCategoryUnchanged = computed(
+  () => assetTitleForm.category.trim() === (workbench.selectedAsset?.category ?? ''),
 )
 const today = computed(() => new Date().toISOString().slice(0, 10))
 const createFileTypeOptions: Array<{ value: NewAssetFileInput['fileType']; label: string }> = [
@@ -160,13 +166,19 @@ const dayDiff = (from: string, to: string) => Math.round((parseDay(to) - parseDa
 const rangeDuration = (range: ProjectPlanRange) => Math.max(1, dayDiff(range.startDate, range.endDate) + 1)
 const resolvePlanColor = (value: string) =>
   /^#[0-9a-f]{6}$/i.test(value) ? value : legacyPlanColors[value] ?? defaultPlanColor
-const nextAutoPlanColor = () => planPalette[workbench.planRanges.length % planPalette.length] ?? defaultPlanColor
+const activePlanRanges = computed(() => workbench.planRanges.filter((range) => !range.archivedAt))
+const archivedPlanRanges = computed(() =>
+  workbench.planRanges
+    .filter((range) => range.archivedAt)
+    .sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') || b.endDate.localeCompare(a.endDate)),
+)
+const nextAutoPlanColor = () => planPalette[activePlanRanges.value.length % planPalette.length] ?? defaultPlanColor
 const applyAutoPlanColor = () => {
   planForm.color = nextAutoPlanColor()
 }
 
 const sortedPlanRanges = computed(() =>
-  [...workbench.planRanges].sort(
+  [...activePlanRanges.value].sort(
     (a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate),
   ),
 )
@@ -292,6 +304,7 @@ const focusPlanWindow = (startDate: string, endDate: string) => {
     isDeadline: false,
     createdAt: '',
     updatedAt: '',
+    archivedAt: null,
   })
 
   if (duration + 14 > planVisibleDays.value) {
@@ -353,7 +366,7 @@ const selectPlanRange = (range: ProjectPlanRange) => {
   selectedPlanRangeId.value = selectedPlanRangeId.value === range.id ? '' : range.id
 }
 
-const blurPlanTimelineIfOutside = (event: PointerEvent) => {
+const blurPlanTimelineIfOutside = (event: MouseEvent) => {
   const target = event.target
   if (!(target instanceof Node)) return
   if (planTimelineRef.value?.contains(target)) return
@@ -380,6 +393,7 @@ const deadlineStatus = computed(() => {
 })
 const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
   const stats = {
+    folders: 0,
     md: 0,
     ppt: 0,
     images: 0,
@@ -390,7 +404,8 @@ const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
   }
 
   for (const asset of workbench.assets) {
-    if (asset.fileType === 'markdown') stats.md += 1
+    if (asset.assetKind === 'folder') stats.folders += 1
+    else if (asset.fileType === 'markdown') stats.md += 1
     else if (asset.fileType === 'slides') stats.ppt += 1
     else if (asset.fileType === 'image') stats.images += 1
     else if (asset.fileType === 'pdf') stats.papers += 1
@@ -403,6 +418,7 @@ const assetStats = computed<Record<AssetSummaryKey, number>>(() => {
 })
 
 const assetSummaryItems = computed<Array<{ key: AssetSummaryKey; label: string; count: number }>>(() => [
+  { key: 'folders', label: 'folders', count: assetStats.value.folders },
   { key: 'md', label: 'md', count: assetStats.value.md },
   { key: 'ppt', label: 'ppt', count: assetStats.value.ppt },
   { key: 'images', label: 'images', count: assetStats.value.images },
@@ -411,6 +427,20 @@ const assetSummaryItems = computed<Array<{ key: AssetSummaryKey; label: string; 
   { key: 'data', label: 'data', count: assetStats.value.data },
   { key: 'other', label: 'other', count: assetStats.value.other },
 ])
+
+const assetGroups = computed(() => {
+  const grouped = new Map<string, typeof workbench.filteredAssets>()
+
+  for (const asset of workbench.filteredAssets) {
+    const category = asset.category.trim() || 'Uncategorized'
+    grouped.set(category, [...(grouped.get(category) ?? []), asset])
+  }
+
+  return [...grouped.entries()].map(([category, assets]) => ({
+    category,
+    assets,
+  }))
+})
 
 const timelineEventsSorted = computed(() =>
   [...workbench.events].sort((a, b) => a.eventDate.localeCompare(b.eventDate)),
@@ -511,6 +541,10 @@ const chooseImport = async () => {
   fileInput.value?.click()
 }
 
+const chooseFolderImport = async () => {
+  await workbench.importAssetFolder()
+}
+
 const openCreateFileModal = () => {
   createFileForm.fileType = 'md'
   createFileForm.fileName = ''
@@ -566,15 +600,16 @@ const closeAssetDetail = () => {
   isAssetModalOpen.value = false
   workbench.selectedAssetId = ''
   assetTitleForm.title = ''
+  assetTitleForm.category = ''
 }
 
 onMounted(() => {
-  window.addEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+  window.addEventListener('click', blurPlanTimelineIfOutside, true)
 })
 
 onBeforeUnmount(() => {
   stopAssetRefresh()
-  window.removeEventListener('pointerdown', blurPlanTimelineIfOutside, true)
+  window.removeEventListener('click', blurPlanTimelineIfOutside, true)
 })
 
 const resetPlanForm = () => {
@@ -738,15 +773,20 @@ const saveAssetTitle = async () => {
   if (!workbench.selectedAsset) return
 
   const nextTitle = assetTitleForm.title.trim()
+  const nextCategory = assetTitleForm.category.trim()
   if (!nextTitle) {
     workbench.error = 'Asset title is required.'
     return
   }
 
-  if (nextTitle === workbench.selectedAsset.title) return
-
-  await workbench.renameAsset(workbench.selectedAsset.id, nextTitle)
+  if (nextTitle !== workbench.selectedAsset.title) {
+    await workbench.renameAsset(workbench.selectedAsset.id, nextTitle)
+  }
+  if (nextCategory !== (workbench.selectedAsset?.category ?? '')) {
+    await workbench.updateAssetCategory(workbench.selectedAsset.id, nextCategory)
+  }
   assetTitleForm.title = nextTitle
+  assetTitleForm.category = nextCategory
 }
 
 const startEditTimeline = (event: TimelineEvent) => {
@@ -802,7 +842,10 @@ const exportTimeline = async (format: TimelineExportFormat) => {
       <div class="header-actions">
         <input v-model="workbench.searchQuery" type="search" placeholder="Search title, tag, type, or idea" />
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseImport">
-          Import Assets
+          Import Files
+        </button>
+        <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseFolderImport">
+          Import Folder
         </button>
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="openCreateFileModal">
           New File
@@ -817,7 +860,12 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           <h2>Project Plan Timeline</h2>
           <span>{{ deadlineStatus }}</span>
         </div>
-        <span>{{ planViewportLabel }} | {{ sortedPlanRanges.length }} ranges</span>
+        <div class="plan-heading-actions">
+          <button type="button" @click="isPlanMemoOpen = true">
+            Memo: {{ archivedPlanRanges.length }}
+          </button>
+          <span>{{ planViewportLabel }} | {{ sortedPlanRanges.length }} active ranges</span>
+        </div>
       </div>
 
       <form class="plan-form" @submit.prevent="savePlanRange">
@@ -890,8 +938,8 @@ const exportTimeline = async (format: TimelineExportFormat) => {
             <span>Today</span>
           </div>
           <article v-if="!planTimelineItems.length" class="plan-empty-message">
-            <strong>{{ sortedPlanRanges.length ? 'No ranges in this view' : 'No plan ranges yet' }}</strong>
-            <span>{{ sortedPlanRanges.length ? 'Current window has no scheduled ranges.' : 'Add a range above and it will appear on this calendar.' }}</span>
+            <strong>{{ sortedPlanRanges.length ? 'No ranges in this view' : 'No active plan ranges' }}</strong>
+            <span>{{ sortedPlanRanges.length ? 'Current window has no scheduled ranges.' : 'Add a range above; expired ranges move into Memo automatically.' }}</span>
           </article>
           <template v-if="!planTimelineItems.length">
             <article
@@ -968,29 +1016,36 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         </div>
 
         <div v-if="workbench.filteredAssets.length" class="asset-list">
-          <article
-            v-for="asset in workbench.filteredAssets"
-            :key="asset.id"
-            class="asset-row"
-            :class="{ active: asset.id === workbench.selectedAssetId }"
-          >
-            <button type="button" class="asset-main" @click="openAssetDetail(asset.id)">
-              <span class="file-type">{{ asset.fileType }}</span>
-              <strong>{{ asset.title }}</strong>
-              <small>{{ asset.originalName }}</small>
-              <span class="tag-row">
-                <em v-for="tag in asset.tags" :key="tag">{{ tag }}</em>
-              </span>
-            </button>
-            <button
-              type="button"
-              class="danger-button asset-delete-button"
-              title="Delete asset"
-              @click="deleteAsset(asset.id, asset.title)"
+          <section v-for="group in assetGroups" :key="group.category" class="asset-group">
+            <header class="asset-group-heading">
+              <strong>{{ group.category }}</strong>
+              <span>{{ group.assets.length }} {{ group.assets.length === 1 ? 'asset' : 'assets' }}</span>
+            </header>
+            <article
+              v-for="asset in group.assets"
+              :key="asset.id"
+              class="asset-row"
+              :class="{ active: asset.id === workbench.selectedAssetId }"
             >
-              Delete
-            </button>
-          </article>
+              <button type="button" class="asset-main" @click="openAssetDetail(asset.id)">
+                <span class="file-type">{{ asset.assetKind === 'folder' ? 'folder' : asset.fileType }}</span>
+                <strong>{{ asset.title }}</strong>
+                <small>{{ asset.originalName }}</small>
+                <span class="tag-row">
+                  <em v-if="asset.category">{{ asset.category }}</em>
+                  <em v-for="tag in asset.tags" :key="tag">{{ tag }}</em>
+                </span>
+              </button>
+              <button
+                type="button"
+                class="danger-button asset-delete-button"
+                title="Delete asset"
+                @click="deleteAsset(asset.id, asset.title)"
+              >
+                Delete
+              </button>
+            </article>
+          </section>
         </div>
 
         <p v-else class="empty-copy">
@@ -1207,6 +1262,47 @@ const exportTimeline = async (format: TimelineExportFormat) => {
 
     <Teleport to="body">
       <div
+        v-if="isPlanMemoOpen"
+        class="modal-backdrop"
+        role="presentation"
+        @click.self="isPlanMemoOpen = false"
+      >
+        <section class="asset-modal plan-memo-modal" role="dialog" aria-modal="true" aria-labelledby="plan-memo-title">
+          <header class="modal-header">
+            <div>
+              <p class="eyebrow">Plan Memo</p>
+              <h2 id="plan-memo-title">Expired plan ranges</h2>
+              <p>{{ archivedPlanRanges.length }} archived ranges are hidden from the active calendar.</p>
+            </div>
+            <button type="button" class="icon-button close-button" title="Close" @click="isPlanMemoOpen = false">x</button>
+          </header>
+
+          <div v-if="archivedPlanRanges.length" class="plan-memo-list">
+            <article
+              v-for="range in archivedPlanRanges"
+              :key="range.id"
+              class="plan-memo-card"
+              :style="{ '--plan-bg': resolvePlanColor(range.color) }"
+            >
+              <header>
+                <strong>{{ range.title }}</strong>
+                <span>{{ range.startDate }} - {{ range.endDate }}</span>
+              </header>
+              <p>{{ range.description || 'No description.' }}</p>
+              <div class="asset-modal-meta">
+                <span>{{ rangeDuration(range) }} days</span>
+                <span>{{ range.isDeadline ? 'Deadline' : 'Range' }}</span>
+                <span>Archived: {{ range.archivedAt ? new Date(range.archivedAt).toLocaleString() : 'Unknown' }}</span>
+              </div>
+            </article>
+          </div>
+          <p v-else class="empty-copy">No expired plan ranges yet.</p>
+        </section>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
         v-if="isAssetModalOpen && workbench.selectedAsset"
         class="modal-backdrop"
         role="presentation"
@@ -1223,7 +1319,8 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           </header>
 
           <div class="asset-modal-meta">
-            <span>{{ workbench.selectedAsset.fileType }}</span>
+            <span>{{ workbench.selectedAsset.assetKind === 'folder' ? 'Folder' : workbench.selectedAsset.fileType }}</span>
+            <span>{{ workbench.selectedAsset.category || 'Uncategorized' }}</span>
             <span>{{ Math.max(1, Math.round(workbench.selectedAsset.sizeBytes / 1024)) }} KB</span>
             <span>Imported: {{ new Date(workbench.selectedAsset.createdAt).toLocaleString() }}</span>
             <span>Last modified: {{ new Date(workbench.selectedAsset.updatedAt).toLocaleString() }}</span>
@@ -1235,15 +1332,15 @@ const exportTimeline = async (format: TimelineExportFormat) => {
               <input v-model="assetTitleForm.title" type="text" placeholder="Asset title" />
             </label>
             <label>
-              File type
-              <input :value="workbench.selectedAsset.fileType" type="text" disabled />
+              Category
+              <input v-model="assetTitleForm.category" type="text" placeholder="Review task, rebuttal, experiment..." />
             </label>
             <button
               type="submit"
               class="primary-button"
-              :disabled="workbench.loading || !assetTitleForm.title.trim() || isAssetTitleUnchanged"
+              :disabled="workbench.loading || !assetTitleForm.title.trim() || (isAssetTitleUnchanged && isAssetCategoryUnchanged)"
             >
-              Save Title
+              Save
             </button>
           </form>
 
@@ -1255,7 +1352,9 @@ const exportTimeline = async (format: TimelineExportFormat) => {
           <form class="version-form modal-version-form" @submit.prevent="saveVersion">
             <input v-model="versionForm.label" type="text" placeholder="version label: v2 / final" />
             <input v-model="versionForm.note" type="text" placeholder="What changed in this version" />
-            <button type="submit" :disabled="workbench.loading">Save New Version</button>
+            <button type="submit" :disabled="workbench.loading">
+              {{ workbench.selectedAsset.assetKind === 'folder' ? 'Save Folder Snapshot' : 'Save New Version' }}
+            </button>
           </form>
           <p v-if="versionError" class="inline-error">{{ versionError }}</p>
 

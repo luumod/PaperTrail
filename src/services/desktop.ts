@@ -47,10 +47,13 @@ export const desktopApi = {
   getProjectBundle: (projectId: string) =>
     invoke<ProjectBundle>('get_project_bundle', { projectId }),
   importAssets: (projectId: string) => invoke<Asset[]>('import_assets', { projectId }),
+  importAssetFolder: (projectId: string) => invoke<Asset | null>('import_asset_folder', { projectId }),
   createAssetFile: (projectId: string, input: NewAssetFileInput) =>
     invoke<ProjectBundle>('create_asset_file', { projectId, input }),
   renameAsset: (assetId: string, title: string) =>
     invoke<ProjectBundle>('rename_asset', { assetId, title }),
+  updateAssetCategory: (assetId: string, category: string) =>
+    invoke<ProjectBundle>('update_asset_category', { assetId, category }),
   deleteAsset: (assetId: string) => invoke<ProjectBundle>('delete_asset', { assetId }),
   openAsset: (assetId: string) => invoke<void>('open_asset', { assetId }),
   revealAsset: (assetId: string) => invoke<void>('reveal_asset', { assetId }),

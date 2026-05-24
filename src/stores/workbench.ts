@@ -97,6 +97,13 @@ const normalizePlanRange = (
   isDeadline: range.isDeadline ?? false,
   createdAt: range.createdAt ?? nowIso(),
   updatedAt: range.updatedAt ?? range.createdAt ?? nowIso(),
+  archivedAt: range.archivedAt ?? null,
+})
+
+const normalizeAsset = (asset: Asset): Asset => ({
+  ...asset,
+  assetKind: asset.assetKind ?? 'file',
+  category: asset.category ?? '',
 })
 
 const detectType = (name: string, mimeType = ''): AssetType => {
@@ -110,6 +117,17 @@ const detectType = (name: string, mimeType = ''): AssetType => {
     return 'image'
   }
   if (['csv', 'tsv', 'xlsx', 'xls', 'json'].includes(ext)) return 'data'
+  return 'other'
+}
+
+const assetSummaryKey = (asset: Pick<Asset, 'assetKind' | 'fileType'>): AssetSummaryKey => {
+  if (asset.assetKind === 'folder') return 'folders'
+  if (asset.fileType === 'markdown') return 'md'
+  if (asset.fileType === 'slides') return 'ppt'
+  if (asset.fileType === 'image') return 'images'
+  if (asset.fileType === 'pdf') return 'papers'
+  if (asset.fileType === 'word') return 'word'
+  if (asset.fileType === 'data') return 'data'
   return 'other'
 }
 
@@ -149,6 +167,7 @@ const loadLocalState = (): LocalState => {
     return {
       ...parsed,
       projects: parsed.projects.map((project) => normalizeProject(project)),
+      assets: parsed.assets.map((asset) => normalizeAsset(asset)),
       ideas: parsed.ideas.map((idea) => normalizeIdea(idea)),
       planRanges: parsed.planRanges.map((range) => normalizePlanRange(range)),
     }
@@ -190,10 +209,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
     return assets.value.filter((asset) =>
       (!query ||
-        [asset.title, asset.originalName, asset.fileType, ...asset.tags].some((field) =>
+        [asset.title, asset.originalName, asset.fileType, asset.assetKind, asset.category, ...asset.tags].some((field) =>
           field.toLowerCase().includes(query),
         )) &&
-      (!typeFilters.size || typeFilters.has(assetSummaryKey(asset.fileType))),
+      (!typeFilters.size || typeFilters.has(assetSummaryKey(asset))),
     )
   })
 
@@ -267,16 +286,6 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     dataRevision.value += 1
   }
 
-  const assetSummaryKey = (fileType: AssetType): AssetSummaryKey => {
-    if (fileType === 'markdown') return 'md'
-    if (fileType === 'slides') return 'ppt'
-    if (fileType === 'image') return 'images'
-    if (fileType === 'pdf') return 'papers'
-    if (fileType === 'word') return 'word'
-    if (fileType === 'data') return 'data'
-    return 'other'
-  }
-
   const toggleAssetTypeFilter = (type: AssetSummaryKey) => {
     selectedAssetTypes.value = selectedAssetTypes.value.includes(type)
       ? selectedAssetTypes.value.filter((item) => item !== type)
@@ -298,10 +307,12 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const setBundle = (bundle: ProjectBundle) => {
-    assets.value = bundle.assets ?? []
+    assets.value = (bundle.assets ?? []).map((asset) => normalizeAsset(asset))
     versions.value = bundle.versions ?? []
     ideas.value = (bundle.ideas ?? []).map((idea) => normalizeIdea(idea))
-    planRanges.value = (bundle.planRanges ?? []).map((range) => normalizePlanRange(range))
+    planRanges.value = (bundle.planRanges ?? [])
+      .map((range) => normalizePlanRange(range))
+      .sort((a, b) => a.startDate.localeCompare(b.startDate) || a.endDate.localeCompare(b.endDate))
     events.value = bundle.events ?? []
     summaries.value = bundle.summaries ?? []
     selectedAssetId.value = ''
@@ -310,6 +321,26 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const localProjectBundle = (projectId: string): ProjectBundle => {
     const local = loadLocalState()
     const projectAssets = local.assets.filter((asset) => asset.projectId === projectId)
+    const timestamp = nowIso()
+    const today = timestamp.slice(0, 10)
+    let archivedExpiredRanges = false
+    const projectPlanRanges = local.planRanges
+      .filter((range) => range.projectId === projectId)
+      .map((range) => {
+        if (!range.archivedAt && range.endDate < today) {
+          archivedExpiredRanges = true
+          return { ...range, archivedAt: timestamp, updatedAt: timestamp }
+        }
+        return range
+      })
+
+    if (archivedExpiredRanges) {
+      local.planRanges = [
+        ...local.planRanges.filter((range) => range.projectId !== projectId),
+        ...projectPlanRanges,
+      ]
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(local))
+    }
 
     return {
       assets: projectAssets,
@@ -317,7 +348,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         projectAssets.some((asset) => asset.id === version.assetId),
       ),
       ideas: local.ideas.filter((idea) => idea.projectId === projectId),
-      planRanges: local.planRanges.filter((range) => range.projectId === projectId),
+      planRanges: projectPlanRanges,
       events: local.events.filter((event) => event.projectId === projectId),
       summaries: local.summaries.filter((summary) => summary.projectId === projectId),
     }
@@ -657,9 +688,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           originalName: file.name,
           fileName: file.name,
           filePath: file.name,
+          assetKind: 'file',
           fileType: detectType(file.name, file.type),
           mimeType: file.type,
           sizeBytes: file.size,
+          category: '',
           tags: [],
           currentVersionId: versionId,
           createdAt: timestamp,
@@ -701,6 +734,21 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
     }, 'Failed to import assets')
 
+  const importAssetFolder = async () =>
+    runAction(async () => {
+      if (!activeProjectId.value) return
+
+      if (usingDesktop.value) {
+        const imported = await desktopApi.importAssetFolder(activeProjectId.value)
+        if (imported) {
+          await refreshProjectBundle(activeProjectId.value)
+        }
+        return
+      }
+
+      alert('Folder assets require Electron desktop mode.')
+    }, 'Failed to import folder asset')
+
   const createAssetFile = async (input: NewAssetFileInput) =>
     runAction(async () => {
       if (!activeProjectId.value) return
@@ -728,9 +776,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         originalName: fileName,
         fileName,
         filePath: fileName,
+        assetKind: 'file',
         fileType: spec.assetType,
         mimeType: '',
         sizeBytes: 0,
+        category: '',
         tags: [],
         currentVersionId: versionId,
         createdAt: timestamp,
@@ -841,6 +891,46 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
     }, 'Failed to rename asset')
 
+  const updateAssetCategory = async (assetId: string, category: string) =>
+    runAction(async () => {
+      const asset = assets.value.find((item) => item.id === assetId)
+      const nextCategory = category.trim()
+      if (!asset || nextCategory === asset.category) return
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.updateAssetCategory(assetId, nextCategory)
+        setBundle(bundle)
+        selectedAssetId.value = assetId
+        return
+      }
+
+      const timestamp = nowIso()
+      assets.value = assets.value.map((item) =>
+        item.id === assetId
+          ? {
+              ...item,
+              category: nextCategory,
+              updatedAt: timestamp,
+            }
+          : item,
+      )
+      events.value = [
+        {
+          id: makeId('event'),
+          projectId: asset.projectId,
+          eventType: 'asset_updated',
+          title: `Set asset category: ${asset.title}`,
+          description: nextCategory ? `Category: ${nextCategory}` : 'Category cleared.',
+          assetId,
+          ideaId: null,
+          versionId: null,
+          eventDate: timestamp,
+        },
+        ...events.value,
+      ]
+      persistLocal()
+    }, 'Failed to update asset category')
+
   const openAsset = async (assetId: string) =>
     runAction(async () => {
       if (usingDesktop.value) {
@@ -903,6 +993,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       const timestamp = nowIso()
       const versionId = makeId('version')
       const versionLabel = label || `v${versions.value.filter((item) => item.assetId === assetId).length + 1}`
+      const versionNote = asset.assetKind === 'folder'
+        ? `${note} Browser demo mode saves folder metadata only.`
+        : note
 
       versions.value = [
         {
@@ -912,7 +1005,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           fileName: asset.fileName,
           filePath: asset.filePath,
           sizeBytes: asset.sizeBytes,
-          note,
+          note: versionNote,
           createdAt: timestamp,
         },
         ...versions.value,
@@ -1104,6 +1197,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       }
 
       const timestamp = nowIso()
+      const today = timestamp.slice(0, 10)
       const range: ProjectPlanRange = {
         id: makeId('plan'),
         projectId: activeProjectId.value,
@@ -1115,6 +1209,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         isDeadline: input.isDeadline,
         createdAt: timestamp,
         updatedAt: timestamp,
+        archivedAt: input.endDate < today ? timestamp : null,
       }
 
       planRanges.value = [...planRanges.value, range].sort((a, b) =>
@@ -1151,6 +1246,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         color: input.color,
         isDeadline: input.isDeadline,
         updatedAt: timestamp,
+        archivedAt: input.endDate < timestamp.slice(0, 10) ? timestamp : null,
       }
       planRanges.value = planRanges.value
         .map((range) => (range.id === rangeId ? updated : range))
@@ -1311,8 +1407,10 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     selectProject,
     toggleAssetTypeFilter,
     importAssets,
+    importAssetFolder,
     createAssetFile,
     renameAsset,
+    updateAssetCategory,
     deleteAsset,
     openAsset,
     revealAsset,

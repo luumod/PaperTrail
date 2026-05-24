@@ -942,7 +942,6 @@ label.file-action:hover {
 .project-page.is-project-switching {
   opacity: 0.72;
   transform: translateY(2px);
-  pointer-events: none;
 }
 
 .project-header {
@@ -996,6 +995,22 @@ label.file-action:hover {
   color: var(--color-text-secondary);
   font-size: 0.82rem;
   text-transform: none;
+}
+
+.plan-heading-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.plan-heading-actions button {
+  padding: 6px 12px;
+  color: var(--color-brand);
+  background: var(--color-info-bg);
+  font-size: 0.82rem;
+  font-weight: 700;
 }
 
 .plan-form {
@@ -1438,11 +1453,35 @@ label.file-action:hover {
 .asset-list {
   display: grid;
   align-content: start;
-  gap: var(--space-sm);
+  gap: var(--space-md);
   max-height: clamp(280px, 44vh, 480px);
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+}
+
+.asset-group {
+  display: grid;
+  gap: var(--space-sm);
+}
+
+.asset-group-heading {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border-light);
+  padding-bottom: 6px;
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.asset-group-heading span {
+  color: var(--color-text-muted);
+  font-size: 0.74rem;
+  text-transform: none;
 }
 
 .asset-row {
@@ -1772,6 +1811,52 @@ label.file-action:hover {
   width: min(560px, 100%);
 }
 
+.plan-memo-modal {
+  width: min(760px, 100%);
+}
+
+.plan-memo-list {
+  display: grid;
+  gap: var(--space-md);
+  max-height: 480px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.plan-memo-card {
+  display: grid;
+  gap: var(--space-sm);
+  border: 1px solid var(--color-border);
+  border-left: 4px solid var(--plan-bg);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+  background: var(--color-surface);
+}
+
+.plan-memo-card header {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: start;
+  justify-content: space-between;
+}
+
+.plan-memo-card header strong {
+  min-width: 0;
+}
+
+.plan-memo-card header span {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.plan-memo-card p {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
 .create-file-form label {
   display: grid;
   gap: 6px;
@@ -1841,7 +1926,7 @@ label.file-action:hover {
 }
 
 .asset-title-form {
-  grid-template-columns: minmax(0, 1fr) 140px auto;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.65fr) auto;
   align-items: end;
 }
 
