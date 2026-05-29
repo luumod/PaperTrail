@@ -840,7 +840,12 @@ const exportTimeline = async (format: TimelineExportFormat) => {
         </div>
       </div>
       <div class="header-actions">
-        <input v-model="workbench.searchQuery" type="search" placeholder="Search title, tag, type, or idea" />
+        <input
+          v-model="workbench.searchQuery"
+          type="search"
+          aria-label="Search project"
+          placeholder="Search title, tag, type, or idea"
+        />
         <button type="button" class="primary-button" :disabled="workbench.loading" @click="chooseImport">
           Import Files
         </button>

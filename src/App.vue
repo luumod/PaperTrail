@@ -60,6 +60,8 @@ const selectProject = async (projectId: string) => {
 
 <template>
   <div class="app-shell">
+    <a class="skip-link" href="#main-content">Skip to workspace</a>
+
     <div class="operation-toast-region" aria-live="polite" aria-atomic="true">
       <p v-if="workbench.error" class="operation-toast error-banner" role="alert">
         {{ workbench.error }}
@@ -142,7 +144,7 @@ const selectProject = async (projectId: string) => {
       </nav>
     </aside>
 
-    <main class="content">
+    <main id="main-content" class="content" tabindex="-1">
       <RouterView />
     </main>
   </div>
