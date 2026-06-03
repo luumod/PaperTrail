@@ -418,6 +418,7 @@ const ensureColumn = (db, tableName, columnName, definition) => {
   if (!exists) {
     db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
   }
+  return !exists
 }
 
 const initDb = (db) => {
@@ -432,6 +433,7 @@ const initDb = (db) => {
       cover_path TEXT NOT NULL DEFAULT '',
       workspace_path TEXT NOT NULL,
       tags TEXT NOT NULL,
+      sort_order REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       deleted_at TEXT
@@ -451,6 +453,7 @@ const initDb = (db) => {
       category TEXT NOT NULL DEFAULT '',
       tags TEXT NOT NULL,
       current_version_id TEXT NOT NULL,
+      sort_order REAL NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -513,11 +516,20 @@ const initDb = (db) => {
       UNIQUE(project_id, day)
     );
   `)
+  const addedProjectSortOrder = ensureColumn(db, 'projects', 'sort_order', 'REAL NOT NULL DEFAULT 0')
   ensureColumn(db, 'projects', 'deleted_at', 'TEXT')
   ensureColumn(db, 'assets', 'asset_kind', "TEXT NOT NULL DEFAULT 'file'")
   ensureColumn(db, 'assets', 'category', "TEXT NOT NULL DEFAULT ''")
+  const addedAssetSortOrder = ensureColumn(db, 'assets', 'sort_order', 'REAL NOT NULL DEFAULT 0')
   ensureColumn(db, 'ideas', 'completed', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'project_plan_ranges', 'archived_at', 'TEXT')
+
+  if (addedProjectSortOrder) {
+    run(db, `UPDATE projects SET sort_order = -CAST(strftime('%s', created_at) AS REAL)`)
+  }
+  if (addedAssetSortOrder) {
+    run(db, `UPDATE assets SET sort_order = -CAST(strftime('%s', created_at) AS REAL)`)
+  }
 }
 
 const detectFileType = (name) => {
@@ -541,9 +553,10 @@ const rowToProject = (row) => ({
   coverPath: row[6],
   workspacePath: row[7],
   tags: tagsFromJson(row[8]),
-  createdAt: row[9],
-  updatedAt: row[10],
-  deletedAt: row[11],
+  sortOrder: Number(row[9]) || 0,
+  createdAt: row[10],
+  updatedAt: row[11],
+  deletedAt: row[12],
 })
 
 const rowToAsset = (row) => ({
@@ -560,8 +573,9 @@ const rowToAsset = (row) => ({
   category: row[10] || '',
   tags: tagsFromJson(row[11]),
   currentVersionId: row[12],
-  createdAt: row[13],
-  updatedAt: row[14],
+  sortOrder: Number(row[13]) || 0,
+  createdAt: row[14],
+  updatedAt: row[15],
 })
 
 const rowToVersion = (row) => ({
@@ -623,7 +637,7 @@ const rowToSummary = (row) => ({
 
 const selectProjectSql = `
   SELECT id, title, description, research_direction, stage, target_venue, cover_path,
-         workspace_path, tags, created_at, updated_at, deleted_at
+         workspace_path, tags, sort_order, created_at, updated_at, deleted_at
   FROM projects
 `
 
@@ -634,7 +648,7 @@ const getAsset = (db, assetId) =>
   rows(
     db,
     `SELECT id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
-            size_bytes, category, tags, current_version_id, created_at, updated_at
+            size_bytes, category, tags, current_version_id, sort_order, created_at, updated_at
      FROM assets WHERE id = ?`,
     [assetId],
   ).map(rowToAsset)[0]
@@ -745,15 +759,20 @@ const insertEvent = (db, projectId, eventType, title, description, assetId = nul
 }
 
 const listProjects = (db) =>
-  rows(db, `${selectProjectSql} WHERE deleted_at IS NULL ORDER BY updated_at DESC`).map(rowToProject)
+  rows(db, `${selectProjectSql} WHERE deleted_at IS NULL ORDER BY sort_order ASC, updated_at DESC`).map(rowToProject)
+
+const nextTopProjectSortOrder = (db) => Number(scalar(db, 'SELECT MIN(sort_order) FROM projects WHERE deleted_at IS NULL') ?? 0) - 1
+
+const nextTopAssetSortOrder = (db, projectId, count = 1) =>
+  Number(scalar(db, 'SELECT MIN(sort_order) FROM assets WHERE project_id = ?', [projectId]) ?? 0) - count
 
 const getProjectBundle = (db, projectId) => {
   archiveExpiredPlanRanges(db, projectId)
   const assets = rows(
     db,
     `SELECT id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
-            size_bytes, category, tags, current_version_id, created_at, updated_at
-     FROM assets WHERE project_id = ? ORDER BY updated_at DESC`,
+            size_bytes, category, tags, current_version_id, sort_order, created_at, updated_at
+     FROM assets WHERE project_id = ? ORDER BY sort_order ASC, updated_at DESC`,
     [projectId],
   ).map(rowToAsset)
   const assetIds = new Set(assets.map((asset) => asset.id))
@@ -882,8 +901,8 @@ handle('create_project', async ({ input }) => {
     db,
     `INSERT INTO projects
      (id, title, description, research_direction, stage, target_venue, cover_path,
-      workspace_path, tags, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      workspace_path, tags, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       projectId,
       input.title,
@@ -894,6 +913,7 @@ handle('create_project', async ({ input }) => {
       '',
       projectDir,
       tagsToJson(input.tags),
+      nextTopProjectSortOrder(db),
       timestamp,
       timestamp,
     ],
@@ -928,6 +948,19 @@ handle('update_project', async ({ projectId, input }) => {
   const project = getProject(db, projectId)
   await saveDb(db, file)
   return project
+})
+
+handle('reorder_projects', async ({ projectIds }) => {
+  const orderedIds = Array.isArray(projectIds) ? projectIds.filter(Boolean) : []
+  const { db, file } = await openDb()
+
+  orderedIds.forEach((projectId, index) => {
+    run(db, 'UPDATE projects SET sort_order = ? WHERE id = ? AND deleted_at IS NULL', [index, projectId])
+  })
+
+  const projects = listProjects(db)
+  await saveDb(db, file)
+  return projects
 })
 
 handle('delete_project', async ({ projectId }) => {
@@ -1006,6 +1039,7 @@ handle('import_assets', async ({ projectId }) => {
   const imported = []
   const assetDir = path.join(project.workspacePath, 'assets')
   await fsp.mkdir(assetDir, { recursive: true })
+  let sortOrder = nextTopAssetSortOrder(db, projectId, result.filePaths.length)
 
   for (const source of result.filePaths) {
     const originalName = path.basename(source)
@@ -1028,8 +1062,8 @@ handle('import_assets', async ({ projectId }) => {
       db,
       `INSERT INTO assets
        (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
-        size_bytes, category, tags, current_version_id, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        size_bytes, category, tags, current_version_id, sort_order, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         assetId,
         projectId,
@@ -1044,10 +1078,12 @@ handle('import_assets', async ({ projectId }) => {
         '',
         '[]',
         versionId,
+        sortOrder,
         timestamp,
         modifiedAt,
       ],
     )
+    sortOrder += 1
     run(
       db,
       `INSERT INTO asset_versions
@@ -1098,8 +1134,8 @@ handle('import_asset_folder', async ({ projectId }) => {
     db,
     `INSERT INTO assets
      (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
-      size_bytes, category, tags, current_version_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      size_bytes, category, tags, current_version_id, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       assetId,
       projectId,
@@ -1114,6 +1150,7 @@ handle('import_asset_folder', async ({ projectId }) => {
       originalName,
       '[]',
       versionId,
+      nextTopAssetSortOrder(db, projectId),
       timestamp,
       modifiedAt,
     ],
@@ -1171,8 +1208,8 @@ handle('create_asset_file', async ({ projectId, input }) => {
     db,
     `INSERT INTO assets
      (id, project_id, title, original_name, file_name, file_path, asset_kind, file_type, mime_type,
-      size_bytes, category, tags, current_version_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      size_bytes, category, tags, current_version_id, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       assetId,
       projectId,
@@ -1187,6 +1224,7 @@ handle('create_asset_file', async ({ projectId, input }) => {
       '',
       '[]',
       versionId,
+      nextTopAssetSortOrder(db, projectId),
       timestamp,
       modifiedAt,
     ],
@@ -1294,6 +1332,19 @@ handle('update_asset_category', async ({ assetId, category }) => {
     assetId,
   )
   const bundle = getProjectBundle(db, asset.projectId)
+  await saveDb(db, file)
+  return bundle
+})
+
+handle('reorder_assets', async ({ projectId, assetIds }) => {
+  const orderedIds = Array.isArray(assetIds) ? assetIds.filter(Boolean) : []
+  const { db, file } = await openDb()
+
+  orderedIds.forEach((assetId, index) => {
+    run(db, 'UPDATE assets SET sort_order = ? WHERE id = ? AND project_id = ?', [index, assetId, projectId])
+  })
+
+  const bundle = getProjectBundle(db, projectId)
   await saveDb(db, file)
   return bundle
 })

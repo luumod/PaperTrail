@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { onMounted, reactive } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { projectStageOptions, useWorkbenchStore } from '@/stores/workbench'
 import type { ProjectStage } from '@/types'
 
 const router = useRouter()
 const workbench = useWorkbenchStore()
+const SIDEBAR_STATE_KEY = 'paper-timeline-workbench.sidebar'
+const isSidebarCollapsed = ref(localStorage.getItem(SIDEBAR_STATE_KEY) === 'collapsed')
+const draggedProjectId = ref('')
+const projectDragOverId = ref('')
 
 const projectForm = reactive({
   title: '',
@@ -56,10 +60,42 @@ const createProject = async () => {
 const selectProject = async (projectId: string) => {
   await router.push(`/projects/${projectId}`)
 }
+
+const toggleSidebar = () => {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value
+  localStorage.setItem(SIDEBAR_STATE_KEY, isSidebarCollapsed.value ? 'collapsed' : 'expanded')
+}
+
+const startProjectDrag = (event: DragEvent, projectId: string) => {
+  if (workbench.loading) return
+  draggedProjectId.value = projectId
+  projectDragOverId.value = ''
+  event.dataTransfer?.setData('text/plain', projectId)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+const handleProjectDragOver = (projectId: string) => {
+  if (!draggedProjectId.value || draggedProjectId.value === projectId) return
+  projectDragOverId.value = projectId
+}
+
+const dropProject = async (event: DragEvent, targetProjectId: string) => {
+  const sourceProjectId = draggedProjectId.value || event.dataTransfer?.getData('text/plain') || ''
+  projectDragOverId.value = ''
+  draggedProjectId.value = ''
+  await workbench.reorderProjects(sourceProjectId, targetProjectId)
+}
+
+const clearProjectDrag = () => {
+  draggedProjectId.value = ''
+  projectDragOverId.value = ''
+}
 </script>
 
 <template>
-  <div class="app-shell">
+  <div class="app-shell" :class="{ 'sidebar-collapsed': isSidebarCollapsed }">
     <a class="skip-link" href="#main-content">Skip to workspace</a>
 
     <div class="operation-toast-region" aria-live="polite" aria-atomic="true">
@@ -71,7 +107,22 @@ const selectProject = async (projectId: string) => {
       </p>
     </div>
 
-    <aside class="sidebar">
+    <button
+      type="button"
+      class="sidebar-toggle"
+      :class="{ collapsed: isSidebarCollapsed }"
+      :aria-expanded="!isSidebarCollapsed"
+      :title="isSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'"
+      @click="toggleSidebar"
+    >
+      <span class="drawer-lines" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+    </button>
+
+    <aside class="sidebar" :aria-hidden="isSidebarCollapsed" :inert="isSidebarCollapsed">
       <RouterLink class="brand" to="/">
         <span class="brand-mark">PT</span>
         <span>
@@ -135,7 +186,17 @@ const selectProject = async (projectId: string) => {
           v-for="project in workbench.visibleProjects"
           :key="project.id"
           type="button"
-          :class="{ active: project.id === workbench.activeProjectId }"
+          :draggable="!workbench.loading"
+          :class="{
+            active: project.id === workbench.activeProjectId,
+            dragging: project.id === draggedProjectId,
+            'drag-over': project.id === projectDragOverId,
+          }"
+          @dragstart="startProjectDrag($event, project.id)"
+          @dragover.prevent="handleProjectDragOver(project.id)"
+          @dragleave="projectDragOverId = ''"
+          @drop.prevent="dropProject($event, project.id)"
+          @dragend="clearProjectDrag"
           @click="selectProject(project.id)"
         >
           <strong>{{ project.title }}</strong>

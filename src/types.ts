@@ -31,6 +31,7 @@ export interface Project {
   coverPath: string
   workspacePath: string
   tags: string[]
+  sortOrder: number
   createdAt: string
   updatedAt: string
   deletedAt: string | null
@@ -64,6 +65,7 @@ export interface Asset {
   category: string
   tags: string[]
   currentVersionId: string
+  sortOrder: number
   createdAt: string
   updatedAt: string
 }

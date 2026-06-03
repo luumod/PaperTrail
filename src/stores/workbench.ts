@@ -41,6 +41,46 @@ const splitTags = (value: string) =>
     .map((tag) => tag.trim())
     .filter(Boolean)
 
+const fallbackSortOrder = (createdAt?: string) => {
+  const createdTime = Date.parse(createdAt ?? '')
+  return Number.isNaN(createdTime) ? 0 : -createdTime
+}
+
+const normalizeSortOrder = (sortOrder: unknown, createdAt?: string) => {
+  const parsed = Number(sortOrder)
+  return Number.isFinite(parsed) ? parsed : fallbackSortOrder(createdAt)
+}
+
+const sortByManualOrder = <T extends { sortOrder: number; createdAt: string; updatedAt: string }>(a: T, b: T) =>
+  a.sortOrder - b.sortOrder ||
+  b.createdAt.localeCompare(a.createdAt) ||
+  b.updatedAt.localeCompare(a.updatedAt)
+
+const nextTopSortOrder = <T extends { sortOrder: number }>(items: T[], count = 1) => {
+  const minOrder = items.reduce((minimum, item) => Math.min(minimum, item.sortOrder), 0)
+  return minOrder - count
+}
+
+const reorderItems = <T extends { id: string; sortOrder: number }>(
+  items: T[],
+  draggedId: string,
+  targetId: string,
+) => {
+  if (!draggedId || !targetId || draggedId === targetId) return null
+
+  const reordered = [...items]
+  const fromIndex = reordered.findIndex((item) => item.id === draggedId)
+  if (fromIndex === -1) return null
+
+  const [dragged] = reordered.splice(fromIndex, 1)
+  if (!dragged) return null
+  const targetIndex = reordered.findIndex((item) => item.id === targetId)
+  if (targetIndex === -1) return null
+
+  reordered.splice(targetIndex, 0, dragged)
+  return reordered.map((item, index) => ({ ...item, sortOrder: index }))
+}
+
 export const projectStageOptions: Array<{ value: ProjectStage; label: string }> = [
   { value: 'idea', label: 'Capture' },
   { value: 'survey', label: 'Explore' },
@@ -65,6 +105,7 @@ const normalizeProject = (project: Partial<Project> & Pick<Project, 'id' | 'titl
   coverPath: project.coverPath ?? '',
   workspacePath: project.workspacePath ?? 'Browser demo workspace',
   tags: project.tags ?? [],
+  sortOrder: normalizeSortOrder(project.sortOrder, project.createdAt),
   createdAt: project.createdAt ?? nowIso(),
   updatedAt: project.updatedAt ?? project.createdAt ?? nowIso(),
   deletedAt: project.deletedAt ?? null,
@@ -104,6 +145,7 @@ const normalizeAsset = (asset: Asset): Asset => ({
   ...asset,
   assetKind: asset.assetKind ?? 'file',
   category: asset.category ?? '',
+  sortOrder: normalizeSortOrder(asset.sortOrder, asset.createdAt),
 })
 
 const detectType = (name: string, mimeType = ''): AssetType => {
@@ -195,7 +237,9 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   const dataRevision = ref(0)
 
   const usingDesktop = computed(() => isDesktopRuntime())
-  const visibleProjects = computed(() => projects.value.filter((project) => !project.deletedAt))
+  const visibleProjects = computed(() =>
+    projects.value.filter((project) => !project.deletedAt).sort(sortByManualOrder),
+  )
   const activeProject = computed(
     () => visibleProjects.value.find((project) => project.id === activeProjectId.value) ?? null,
   )
@@ -207,13 +251,15 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     const query = searchQuery.value.trim().toLowerCase()
     const typeFilters = new Set(selectedAssetTypes.value)
 
-    return assets.value.filter((asset) =>
-      (!query ||
-        [asset.title, asset.originalName, asset.fileType, asset.assetKind, asset.category, ...asset.tags].some((field) =>
-          field.toLowerCase().includes(query),
-        )) &&
-      (!typeFilters.size || typeFilters.has(assetSummaryKey(asset))),
-    )
+    return [...assets.value]
+      .sort(sortByManualOrder)
+      .filter((asset) =>
+        (!query ||
+          [asset.title, asset.originalName, asset.fileType, asset.assetKind, asset.category, ...asset.tags].some((field) =>
+            field.toLowerCase().includes(query),
+          )) &&
+        (!typeFilters.size || typeFilters.has(assetSummaryKey(asset))),
+      )
   })
 
   const filteredIdeas = computed(() => {
@@ -307,7 +353,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
   }
 
   const setBundle = (bundle: ProjectBundle) => {
-    assets.value = (bundle.assets ?? []).map((asset) => normalizeAsset(asset))
+    assets.value = (bundle.assets ?? []).map((asset) => normalizeAsset(asset)).sort(sortByManualOrder)
     versions.value = bundle.versions ?? []
     ideas.value = (bundle.ideas ?? []).map((idea) => normalizeIdea(idea))
     planRanges.value = (bundle.planRanges ?? [])
@@ -320,7 +366,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
   const localProjectBundle = (projectId: string): ProjectBundle => {
     const local = loadLocalState()
-    const projectAssets = local.assets.filter((asset) => asset.projectId === projectId)
+    const projectAssets = local.assets.filter((asset) => asset.projectId === projectId).sort(sortByManualOrder)
     const timestamp = nowIso()
     const today = timestamp.slice(0, 10)
     let archivedExpiredRanges = false
@@ -376,7 +422,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         if (storedWorkspace) {
           const snapshot = await desktopApi.setWorkspace(storedWorkspace)
           workspacePath.value = snapshot.workspacePath
-          projects.value = snapshot.projects
+          projects.value = snapshot.projects.map((project) => normalizeProject(project))
           activeProjectId.value = visibleProjects.value[0]?.id ?? ''
           await refreshProjectBundle(activeProjectId.value)
         }
@@ -385,7 +431,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
       const local = loadLocalState()
       workspacePath.value = local.workspacePath
-      projects.value = local.projects
+      projects.value = local.projects.map((project) => normalizeProject(project))
       activeProjectId.value = local.projects.some((project) => project.id === local.activeProjectId && !project.deletedAt)
         ? local.activeProjectId
         : visibleProjects.value[0]?.id || ''
@@ -405,7 +451,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
 
       const snapshot = await desktopApi.setWorkspace(chosen)
       workspacePath.value = snapshot.workspacePath
-      projects.value = snapshot.projects
+      projects.value = snapshot.projects.map((project) => normalizeProject(project))
       localStorage.setItem(WORKSPACE_KEY, snapshot.workspacePath)
       activeProjectId.value = visibleProjects.value[0]?.id ?? ''
       await refreshProjectBundle(activeProjectId.value)
@@ -433,6 +479,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         coverPath: '',
         workspacePath: workspacePath.value || 'Browser demo workspace',
         tags: input.tags,
+        sortOrder: nextTopSortOrder(projects.value),
         createdAt: timestamp,
         updatedAt: timestamp,
         deletedAt: null,
@@ -506,6 +553,23 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       persistLocal()
       return updatedProject
     }, 'Failed to update project')
+
+  const reorderProjects = async (draggedProjectId: string, targetProjectId: string) =>
+    runAction(async () => {
+      const reordered = reorderItems(visibleProjects.value, draggedProjectId, targetProjectId)
+      if (!reordered) return
+
+      if (usingDesktop.value) {
+        projects.value = (await desktopApi.reorderProjects(reordered.map((project) => project.id))).map((project) =>
+          normalizeProject(project),
+        )
+        return
+      }
+
+      const reorderedById = new Map(reordered.map((project) => [project.id, project]))
+      projects.value = projects.value.map((project) => reorderedById.get(project.id) ?? project)
+      persistLocal()
+    }, 'Failed to reorder projects')
 
   const deleteProject = async (projectId: string) =>
     runAction(async () => {
@@ -678,6 +742,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       if (!files?.length) return
 
       const timestamp = nowIso()
+      let sortOrder = nextTopSortOrder(assets.value, files.length)
       const newAssets: Asset[] = Array.from(files).map((file) => {
         const assetId = makeId('asset')
         const versionId = makeId('version')
@@ -695,9 +760,11 @@ export const useWorkbenchStore = defineStore('workbench', () => {
           category: '',
           tags: [],
           currentVersionId: versionId,
+          sortOrder,
           createdAt: timestamp,
           updatedAt: timestamp,
         }
+        sortOrder += 1
 
         versions.value = [
           {
@@ -783,6 +850,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
         category: '',
         tags: [],
         currentVersionId: versionId,
+        sortOrder: nextTopSortOrder(assets.value),
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -817,6 +885,29 @@ export const useWorkbenchStore = defineStore('workbench', () => {
       ]
       persistLocal()
     }, 'Failed to create file')
+
+  const reorderAssets = async (draggedAssetId: string, targetAssetId: string) =>
+    runAction(async () => {
+      if (!activeProjectId.value) return
+
+      const reordered = reorderItems([...assets.value].sort(sortByManualOrder), draggedAssetId, targetAssetId)
+      if (!reordered) return
+
+      if (usingDesktop.value) {
+        const bundle = await desktopApi.reorderAssets(
+          activeProjectId.value,
+          reordered.map((asset) => asset.id),
+        )
+        setBundle(bundle)
+        selectedAssetId.value = draggedAssetId
+        return
+      }
+
+      const reorderedById = new Map(reordered.map((asset) => [asset.id, asset]))
+      assets.value = assets.value.map((asset) => reorderedById.get(asset.id) ?? asset)
+      selectedAssetId.value = draggedAssetId
+      persistLocal()
+    }, 'Failed to reorder assets')
 
   const deleteAsset = async (assetId: string) =>
     runAction(async () => {
@@ -1400,6 +1491,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     chooseWorkspace,
     createProject,
     updateProject,
+    reorderProjects,
     deleteProject,
     setProjectCover,
     getProjectMetrics,
@@ -1411,6 +1503,7 @@ export const useWorkbenchStore = defineStore('workbench', () => {
     createAssetFile,
     renameAsset,
     updateAssetCategory,
+    reorderAssets,
     deleteAsset,
     openAsset,
     revealAsset,

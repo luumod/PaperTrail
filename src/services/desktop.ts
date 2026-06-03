@@ -41,6 +41,7 @@ export const desktopApi = {
   createProject: (input: ProjectInput) => invoke<Project>('create_project', { input }),
   updateProject: (projectId: string, input: ProjectInput) =>
     invoke<Project>('update_project', { projectId, input }),
+  reorderProjects: (projectIds: string[]) => invoke<Project[]>('reorder_projects', { projectIds }),
   deleteProject: (projectId: string) => invoke<Project>('delete_project', { projectId }),
   setProjectCover: (projectId: string) => invoke<Project>('set_project_cover', { projectId }),
   exportProjectPackage: (projectId: string) => invoke<string>('export_project_package', { projectId }),
@@ -54,6 +55,8 @@ export const desktopApi = {
     invoke<ProjectBundle>('rename_asset', { assetId, title }),
   updateAssetCategory: (assetId: string, category: string) =>
     invoke<ProjectBundle>('update_asset_category', { assetId, category }),
+  reorderAssets: (projectId: string, assetIds: string[]) =>
+    invoke<ProjectBundle>('reorder_assets', { projectId, assetIds }),
   deleteAsset: (assetId: string) => invoke<ProjectBundle>('delete_asset', { assetId }),
   openAsset: (assetId: string) => invoke<void>('open_asset', { assetId }),
   revealAsset: (assetId: string) => invoke<void>('reveal_asset', { assetId }),

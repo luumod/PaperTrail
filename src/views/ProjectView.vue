@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { getProjectStageLabel, useWorkbenchStore } from '@/stores/workbench'
 import type {
+  Asset,
   AssetSummaryKey,
   Idea,
   NewAssetFileInput,
@@ -48,6 +49,8 @@ const editingIdeaId = ref('')
 const editingPlanRangeId = ref('')
 const isProjectSwitching = ref(false)
 const expandedTimelineDays = ref<string[]>([])
+const draggedAssetId = ref('')
+const assetDragOverId = ref('')
 
 const timelineEditForm = reactive({
   title: '',
@@ -603,6 +606,34 @@ const closeAssetDetail = () => {
   assetTitleForm.category = ''
 }
 
+const startAssetDrag = (event: DragEvent, asset: Asset) => {
+  if (workbench.loading) return
+  draggedAssetId.value = asset.id
+  assetDragOverId.value = ''
+  workbench.selectedAssetId = asset.id
+  event.dataTransfer?.setData('text/plain', asset.id)
+  if (event.dataTransfer) {
+    event.dataTransfer.effectAllowed = 'move'
+  }
+}
+
+const handleAssetDragOver = (assetId: string) => {
+  if (!draggedAssetId.value || draggedAssetId.value === assetId) return
+  assetDragOverId.value = assetId
+}
+
+const dropAsset = async (event: DragEvent, targetAssetId: string) => {
+  const sourceAssetId = draggedAssetId.value || event.dataTransfer?.getData('text/plain') || ''
+  assetDragOverId.value = ''
+  draggedAssetId.value = ''
+  await workbench.reorderAssets(sourceAssetId, targetAssetId)
+}
+
+const clearAssetDrag = () => {
+  draggedAssetId.value = ''
+  assetDragOverId.value = ''
+}
+
 onMounted(() => {
   window.addEventListener('click', blurPlanTimelineIfOutside, true)
 })
@@ -1030,7 +1061,17 @@ const exportTimeline = async (format: TimelineExportFormat) => {
               v-for="asset in group.assets"
               :key="asset.id"
               class="asset-row"
-              :class="{ active: asset.id === workbench.selectedAssetId }"
+              :draggable="!workbench.loading"
+              :class="{
+                active: asset.id === workbench.selectedAssetId,
+                dragging: asset.id === draggedAssetId,
+                'drag-over': asset.id === assetDragOverId,
+              }"
+              @dragstart="startAssetDrag($event, asset)"
+              @dragover.prevent="handleAssetDragOver(asset.id)"
+              @dragleave="assetDragOverId = ''"
+              @drop.prevent="dropAsset($event, asset.id)"
+              @dragend="clearAssetDrag"
             >
               <button type="button" class="asset-main" @click="openAssetDetail(asset.id)">
                 <span class="file-type">{{ asset.assetKind === 'folder' ? 'folder' : asset.fileType }}</span>
